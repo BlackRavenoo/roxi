@@ -98,12 +98,11 @@ impl Interpreter {
         let (left, right) = (self.visit_expr(left)?, self.visit_expr(right)?);
 
         match operator.kind {
-            BinaryOpKind::Add => match (left, right) {
+            BinaryOpKind::Add => match (&left, &right) {
                 (Value::Number(left), Value::Number(right)) => Ok(Value::Number(left + right)),
-                (Value::String(left), Value::String(right)) => Ok(Value::String(left + &right)),
-                (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
-                (Value::String(_), v) => Self::invalid_operand(&v, "string", operator.line),
-                (v, _) => Self::invalid_operand(&v, "number or string", operator.line)
+                (Value::String(_), _) | (_, Value::String(_)) => Ok(Value::String(format!("{}{}", left, right))),
+                (Value::Number(_), v) => Self::invalid_operand(&v, "number or string", operator.line),
+                (Value::Bool(_), v) | (Value::Nil, v) => Self::invalid_operand(&v, "string", operator.line),
             },
             BinaryOpKind::Sub => match (left, right) {
                 (Value::Number(left), Value::Number(right)) => Ok(Value::Number(left - right)),
