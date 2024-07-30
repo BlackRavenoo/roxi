@@ -65,7 +65,7 @@ impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
                 Literal::Nil => Ok(Value::Nil),
             },
             Expr::Unary { operator, right } => self.visit_unary_expr(operator, *right),
-            Expr::Ternary { condition, then_branch, else_branch } => todo!(),
+            Expr::Ternary { condition, then_branch, else_branch } => self.visit_ternary_expr(*condition, *then_branch, *else_branch),
         }
     }
 }
@@ -145,6 +145,14 @@ impl Interpreter {
             BinaryOpKind::And => Ok(Value::Bool(Self::is_truthy(&left) && Self::is_truthy(&right))),
             BinaryOpKind::Or => Ok(Value::Bool(Self::is_truthy(&left) || Self::is_truthy(&right))),
         }
+    }
+
+    fn visit_ternary_expr(&mut self, condition: Expr, then_branch: Expr, else_branch: Expr) -> InterpreterResult<Value> {
+        let result = self.visit_expr(condition)?;
+        self.visit_expr(match Self::is_truthy(&result) {
+            true => then_branch,
+            false => else_branch,
+        })
     }
 
     fn is_truthy(value: &Value) -> bool {
