@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{expr::{BinaryOp, BinaryOpKind, Expr, Literal, UnaryOp, UnaryOpKind}, report, scanner::{Scanner, Token, TokenKind}};
+use crate::{expr::{BinaryOp, BinaryOpKind, Expr, Literal, UnaryOp, UnaryOpKind}, report, scanner::{Scanner, Token, TokenKind}, stmt::Stmt};
 
 #[derive(Debug)]
 enum ErrorKind {
@@ -96,9 +96,82 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub fn parse(&mut self) -> ParserResult<Stmt<'a>> {
+        self.declaration()
+    }
+
+    fn declaration(&mut self) -> ParserResult<Stmt<'a>> {
+        let result = match self.token.kind {
+            TokenKind::Var => self.var_declaration(),
+            _ => self.statement()
+        };
+        if let Err(ref e) = result {
+            match self.token.kind {
+                TokenKind::EOF => eprintln!("Error: Unexpected EOF"),
+                TokenKind::Error(_) => report(&self.token),
+                _ => eprintln!("{}", e),
+            }
+            self.synchronize()
+        }
+
+        result
+    }
+
+    fn var_declaration(&mut self) -> ParserResult<Stmt<'a>> {
+        self.advance();
+
+        if self.token.kind != TokenKind::Identifier {
+            return Err(self.unexpected_token(format!("{}. Expected variable name.", self.token.get_lexeme())))
+        }
+
+        let name = self.token.get_lexeme();
+        self.advance();
+        
+        let initializer = if self.token.kind == TokenKind::Equal {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+
+        if self.token.kind != TokenKind::Semicolon {
+            return Err(self.unexpected_token(format!("{}. Expected ';'.", self.token.get_lexeme())))
+        }
+        self.advance();
+
+        Ok(Stmt::Var {name, initializer})
+    }
+
+    fn statement(&mut self) -> ParserResult<Stmt<'a>> {
+        match self.token.kind {
+            TokenKind::Print => self.print_statement(),
+            _ => self.expr_statement()
+        }
+    }
+
+    fn print_statement(&mut self) -> ParserResult<Stmt<'a>> {
+        self.advance();
+        let statement = Stmt::Print(self.expression()?);
+        if self.token.kind != TokenKind::Semicolon {
+            return Err(self.unexpected_token(format!("{}. Expected ';'.", self.token.get_lexeme())))
+        }
+        self.advance();
+
+        Ok(statement)
+    }
+
+    fn expr_statement(&mut self) -> ParserResult<Stmt<'a>> {
+        let statement = Stmt::Expr(self.expression()?);
+        if self.token.kind != TokenKind::Semicolon {
+            return Err(self.unexpected_token(format!("{}. Expected ';'.", self.token.get_lexeme())))
+        }
+        self.advance();
+        
+        Ok(statement)
+    }
+
     #[inline(always)]
     pub fn expression(&mut self) -> ParserResult<Expr<'a>> {
-        while matches!(
+        if matches!(
             self.token.kind,
             TokenKind::Plus
             | TokenKind::Star
@@ -117,23 +190,10 @@ impl<'a> Parser<'a> {
                 line: self.token.get_line(),
                 kind: ErrorKind::MissingLhs
             };
-            eprintln!("{}", e);
-            self.synchronize();
-            if self.is_at_end() {
-                return Err(e)
-            }
-        }
-        let result = self.ternary();
-        if let Err(ref e) = result {
-            match self.token.kind {
-                TokenKind::EOF => eprintln!("Error: Unexpected EOF"),
-                TokenKind::Error(_) => report(&self.token),
-                _ => eprintln!("{}", e),
-            }
-            self.synchronize()
+            return Err(e)
         }
 
-        result
+        self.ternary()
     }
 
     fn ternary(&mut self) -> ParserResult<Expr<'a>> {
@@ -144,11 +204,7 @@ impl<'a> Parser<'a> {
             let then_branch = self.equality()?;
             
             if self.token.kind != TokenKind::Colon {
-                return Err(ParserError{
-                    msg: format!("{}. Expected ':' character.", self.token.get_lexeme()),
-                    line: self.token.get_line(),
-                    kind: ErrorKind::UnexpectedToken
-                });
+                return Err(self.unexpected_token(format!("{}. Expected ':'.", self.token.get_lexeme())))
             }
             self.advance();
             let else_branch = self.equality()?;
@@ -166,7 +222,7 @@ impl<'a> Parser<'a> {
     fn equality(&mut self) -> ParserResult<Expr<'a>> {
         let mut expr = self.comparison()?;
 
-        while [TokenKind::EqualEqual, TokenKind::BangEqual].contains(&self.token.kind) {
+        while matches!(self.token.kind, TokenKind::EqualEqual | TokenKind::BangEqual) {
             let operator = self.binary_operator()?;
             let right = self.comparison()?;
             expr = Expr::Binary {
@@ -182,7 +238,7 @@ impl<'a> Parser<'a> {
     fn comparison(&mut self) -> ParserResult<Expr<'a>> {
         let mut expr = self.term()?;
 
-        while [TokenKind::Greater, TokenKind::GreaterEqual, TokenKind::Less, TokenKind::LessEqual].contains(&self.token.kind) {
+        while matches!(self.token.kind, TokenKind::Greater | TokenKind::GreaterEqual | TokenKind::Less | TokenKind::LessEqual) {
             let operator = self.binary_operator()?;
             let right = self.term()?;
             expr = Expr::Binary {
@@ -198,7 +254,7 @@ impl<'a> Parser<'a> {
     fn term(&mut self) -> ParserResult<Expr<'a>> {
         let mut expr = self.factor()?;
 
-        while [TokenKind::Minus, TokenKind::Plus].contains(&self.token.kind) {
+        while matches!(self.token.kind, TokenKind::Minus | TokenKind::Plus) {
             let operator = self.binary_operator()?;
             let right = self.factor()?;
             expr = Expr::Binary {
@@ -214,7 +270,7 @@ impl<'a> Parser<'a> {
     fn factor(&mut self) -> ParserResult<Expr<'a>> {
         let mut expr = self.unary()?;
 
-        while [TokenKind::Slash, TokenKind::Star].contains(&self.token.kind) {
+        while matches!(self.token.kind, TokenKind::Slash | TokenKind::Star) {
             let operator = self.binary_operator()?;
             let right = self.unary()?;
             expr = Expr::Binary {
@@ -228,7 +284,7 @@ impl<'a> Parser<'a> {
     }
 
     fn unary(&mut self) -> ParserResult<Expr<'a>> {
-        if [TokenKind::Minus, TokenKind::Bang].contains(&self.token.kind) {
+        if matches!(self.token.kind, TokenKind::Minus | TokenKind::Bang) {
             let operator = self.unary_operator()?;
             let right = self.unary()?;
             return Ok(Expr::Unary {
@@ -262,11 +318,8 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Expr::Grouping {expression: Box::new(expr)})
             }
-            _ => return Err(ParserError {
-                msg: self.token.get_lexeme().to_owned(),
-                line: self.token.get_line(),
-                kind: ErrorKind::UnexpectedToken,
-            })
+            TokenKind::Identifier => Ok(Expr::Variable {name: self.token.get_lexeme()}),
+            _ => return Err(self.unexpected_token(self.token.get_lexeme().to_owned()))
         };
         self.advance();
         expr
@@ -286,11 +339,7 @@ impl<'a> Parser<'a> {
             TokenKind::GreaterEqual => Ok(BinaryOpKind::Ge),
             TokenKind::And => Ok(BinaryOpKind::And),
             TokenKind::Or => Ok(BinaryOpKind::Or),
-            _ => return Err(ParserError {
-                msg: format!("{}. Expected binary operator.", self.token.get_lexeme()),
-                line: self.token.get_line(),
-                kind: ErrorKind::UnexpectedToken,
-            })
+            _ => return Err(self.unexpected_token(format!("{}. Expected binary operator.", self.token.get_lexeme())))
         }?;
         self.advance();
         Ok(BinaryOp {
@@ -303,16 +352,21 @@ impl<'a> Parser<'a> {
         let kind = match self.token.kind {
             TokenKind::Bang => Ok(UnaryOpKind::Not),
             TokenKind::Minus => Ok(UnaryOpKind::Neg),
-            _ => return Err(ParserError {
-                msg: format!("{}. Expected unary operator.", self.token.get_lexeme()),
-                line: self.token.get_line(),
-                kind: ErrorKind::UnexpectedToken,
-            })
+            _ => return Err(self.unexpected_token(format!("{}. Expected unary operator.", self.token.get_lexeme())))
         }?;
         self.advance();
         Ok(UnaryOp {
             line: self.token.get_line(),
             kind,
         })
+    }
+
+    #[inline(always)]
+    fn unexpected_token(&self, msg: String) -> ParserError {
+        ParserError {
+            msg,
+            line: self.token.get_line(),
+            kind: ErrorKind::UnexpectedToken,
+        }
     }
 }

@@ -40,6 +40,7 @@ impl Visitor<String> for AstPrinter {
             },
             Expr::Unary { operator, right } => parenthesize(operator.kind.as_str(), &[right]),
             Expr::Ternary { condition, then_branch, else_branch } => parenthesize("ternary", &[condition, then_branch, else_branch]),
+            Expr::Variable { name } => todo!(),
         }
     }
 }

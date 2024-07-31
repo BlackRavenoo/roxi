@@ -7,9 +7,9 @@ mod expr;
 mod ast_printer;
 mod parser;
 mod interpreter;
+mod stmt;
 
 use ast_printer::AstPrinter;
-use expr::ExprVisitor;
 use interpreter::Interpreter;
 use parser::Parser;
 use scanner::Scanner;
@@ -70,8 +70,10 @@ fn main() {
             while !parser.is_at_end() {
                 match parser.expression() {
                     Ok(expr) => AstPrinter::print(&expr),
-                    Err(_) => {
+                    Err(e) => {
+                        eprintln!("{}", e);
                         exit_code = 65;
+                        break;
                     },
                 }
             }
@@ -89,10 +91,10 @@ fn main() {
             let mut interpreter = Interpreter{};
 
             while !parser.is_at_end() {
-                match parser.expression() {
+                match parser.parse() {
                     Ok(expr) => {
                         match interpreter.interpret(expr) {
-                            Ok(value) => println!("{}", value),
+                            Ok(_) => (),
                             Err(_) => exit_code = 70,
                         }
                     },
@@ -126,10 +128,10 @@ fn repl() {
         }
         let mut parser = Parser::new(&input);
         let mut interpreter = Interpreter{};
-        match parser.expression() {
-            Ok(expr) => {
-                match interpreter.visit_expr(expr) {
-                    Ok(value) => println!("{}", value),
+        match parser.parse() {
+            Ok(stmt) => {
+                match interpreter.interpret(stmt) {
+                    Ok(_) => (),
                     Err(e) => eprintln!("{}", e),
                 }
             },

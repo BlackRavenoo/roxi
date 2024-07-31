@@ -25,6 +25,9 @@ pub enum Expr<'a> {
         condition: Box<Expr<'a>>,
         then_branch: Box<Expr<'a>>,
         else_branch: Box<Expr<'a>>
+    },
+    Variable {
+        name: &'a str,
     }
 }
 

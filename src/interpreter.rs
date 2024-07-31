@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::expr::{BinaryOp, BinaryOpKind, Expr, ExprVisitor, Literal, UnaryOp, UnaryOpKind};
+use crate::{expr::{BinaryOp, BinaryOpKind, Expr, ExprVisitor, Literal, UnaryOp, UnaryOpKind}, stmt::{Stmt, StmtVisitor}};
 
 #[derive(Debug)]
 enum ErrorKind {
@@ -66,13 +66,24 @@ impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
             },
             Expr::Unary { operator, right } => self.visit_unary_expr(operator, *right),
             Expr::Ternary { condition, then_branch, else_branch } => self.visit_ternary_expr(*condition, *then_branch, *else_branch),
+            Expr::Variable { name } => todo!(),
+        }
+    }
+}
+
+impl StmtVisitor<InterpreterResult<()>> for Interpreter {
+    fn visit_stmt(&mut self, stmt: Stmt) -> InterpreterResult<()> {
+        match stmt {
+            Stmt::Expr(expr) => self.visit_expr_stmt(expr),
+            Stmt::Print(expr) => self.visit_print_stmt(expr),
+            Stmt::Var { name, initializer } => todo!(),
         }
     }
 }
 
 impl Interpreter {
-    pub fn interpret(&mut self, expr: Expr) -> InterpreterResult<Value> {
-        let result = self.visit_expr(expr);
+    pub fn interpret(&mut self, stmt: Stmt) -> InterpreterResult<()> {
+        let result = self.visit_stmt(stmt);
         if let Err(ref e) = result {
             eprintln!("{}", e);
         }
@@ -153,6 +164,17 @@ impl Interpreter {
             true => then_branch,
             false => else_branch,
         })
+    }
+
+    fn visit_expr_stmt(&mut self, expr: Expr) -> InterpreterResult<()> {
+        let _ = self.visit_expr(expr)?;
+        Ok(())
+    }
+
+    fn visit_print_stmt(&mut self, expr: Expr) -> InterpreterResult<()> {
+        let value = self.visit_expr(expr)?;
+        println!("{}", value);
+        Ok(())
     }
 
     fn is_truthy(value: &Value) -> bool {
