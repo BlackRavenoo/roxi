@@ -1,10 +1,11 @@
 use std::fmt::Display;
 
-use crate::{expr::{BinaryOp, BinaryOpKind, Expr, ExprVisitor, Literal, UnaryOp, UnaryOpKind}, stmt::{Stmt, StmtVisitor}};
+use crate::{environment::Environment, expr::{BinaryOp, BinaryOpKind, Expr, ExprVisitor, Literal, UnaryOp, UnaryOpKind}, stmt::{Stmt, StmtVisitor}};
 
 #[derive(Debug)]
 enum ErrorKind {
-    InvalidOperand(&'static str)
+    InvalidOperand(&'static str),
+    DivisionByZero
 }
 
 #[derive(Debug)]
@@ -24,12 +25,18 @@ impl Display for InterpreterError {
                 self.msg,
                 expected
             ),
+            ErrorKind::DivisionByZero => write!(
+                f,
+                "[line {}] Error: Division by zero.",
+                self.line,
+            ),
         }
     }
 }
 
 type InterpreterResult<T> = Result<T, InterpreterError>;
 
+#[derive(Clone)]
 pub enum Value {
     Number(f64),
     String(String),
@@ -50,10 +57,11 @@ impl Display for Value {
 
 
 pub struct Interpreter {
-
+    environment: Environment
 }
 
 impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
+    #[inline]
     fn visit_expr(&mut self, expr: Expr) -> InterpreterResult<Value> {
         match expr {
             Expr::Binary { left, operator, right } => self.visit_binary_expr(*left, operator, *right),
@@ -66,22 +74,29 @@ impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
             },
             Expr::Unary { operator, right } => self.visit_unary_expr(operator, *right),
             Expr::Ternary { condition, then_branch, else_branch } => self.visit_ternary_expr(*condition, *then_branch, *else_branch),
-            Expr::Variable { name } => todo!(),
+            Expr::Variable { name } => self.visit_var_expr(name),
         }
     }
 }
 
 impl StmtVisitor<InterpreterResult<()>> for Interpreter {
+    #[inline]
     fn visit_stmt(&mut self, stmt: Stmt) -> InterpreterResult<()> {
         match stmt {
             Stmt::Expr(expr) => self.visit_expr_stmt(expr),
             Stmt::Print(expr) => self.visit_print_stmt(expr),
-            Stmt::Var { name, initializer } => todo!(),
+            Stmt::Var { name, initializer } => self.visit_var_stmt(name, initializer),
         }
     }
 }
 
 impl Interpreter {
+    #[inline(always)]
+    pub fn new() -> Self {
+        Self {
+            environment: Environment::new()
+        }
+    }
     pub fn interpret(&mut self, stmt: Stmt) -> InterpreterResult<()> {
         let result = self.visit_stmt(stmt);
         if let Err(ref e) = result {
@@ -126,7 +141,13 @@ impl Interpreter {
                 (v, _) => Self::invalid_operand(&v, "number", operator.line)
             },
             BinaryOpKind::Div => match (left, right) {
-                (Value::Number(_), Value::Number(right)) if right == 0.0 => todo!(),
+                (Value::Number(_), Value::Number(right)) if right == 0.0 => Err(
+                    InterpreterError{
+                        msg: String::new(),
+                        line: operator.line,
+                        kind: ErrorKind::DivisionByZero,
+                    }
+                ),
                 (Value::Number(left), Value::Number(right)) => Ok(Value::Number(left / right)),
                 (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
                 (v, _) => Self::invalid_operand(&v, "number", operator.line)
@@ -166,17 +187,41 @@ impl Interpreter {
         })
     }
 
+    fn visit_var_expr(&mut self, name: &str) -> InterpreterResult<Value> {
+        match self.environment.get(name) {
+            Some(Some(value)) => Ok(value.clone()),
+            Some(None) => todo!(), //Err
+            None => todo!(), //Err
+        }
+    }
+
+    #[inline]
     fn visit_expr_stmt(&mut self, expr: Expr) -> InterpreterResult<()> {
         let _ = self.visit_expr(expr)?;
         Ok(())
     }
 
+    #[inline]
     fn visit_print_stmt(&mut self, expr: Expr) -> InterpreterResult<()> {
         let value = self.visit_expr(expr)?;
         println!("{}", value);
         Ok(())
     }
 
+    #[inline]
+    fn visit_var_stmt(&mut self, name: &str, initializer: Option<Expr>) -> InterpreterResult<()> {
+        let value = if let Some(expr) = initializer {
+            Some(self.visit_expr(expr)?)
+        } else {
+            None
+        };
+
+        self.environment.define(name, value);
+
+        Ok(())
+    }
+
+    #[inline(always)]
     fn is_truthy(value: &Value) -> bool {
         match value {
             Value::String(string) => string.len() > 0,
@@ -186,6 +231,7 @@ impl Interpreter {
         }
     }
 
+    #[inline(always)]
     fn is_equal(left: &Value, right: &Value) -> bool {
         match (left, right) {
             (Value::Number(left), Value::Number(right)) => left == right,

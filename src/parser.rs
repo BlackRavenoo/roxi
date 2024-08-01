@@ -70,6 +70,7 @@ impl<'a> Parser<'a> {
         self.token = self.scanner.scan_token();
     }
 
+    #[inline]
     fn synchronize(&mut self) {
         if self.token.kind == TokenKind::Semicolon {
             self.advance();
@@ -96,6 +97,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[inline]
     pub fn parse(&mut self) -> ParserResult<Stmt<'a>> {
         self.declaration()
     }
@@ -120,25 +122,27 @@ impl<'a> Parser<'a> {
     fn var_declaration(&mut self) -> ParserResult<Stmt<'a>> {
         self.advance();
 
-        if self.token.kind != TokenKind::Identifier {
-            return Err(self.unexpected_token(format!("{}. Expected variable name.", self.token.get_lexeme())))
-        }
+        let name = if let TokenKind::Identifier = self.token.kind {
+            self.token.get_lexeme()
+        } else {
+            return Err(self.unexpected_token(format!("{}. Expected variable name.", self.token.get_lexeme())));
+        };
 
-        let name = self.token.get_lexeme();
         self.advance();
         
         let initializer = if self.token.kind == TokenKind::Equal {
+            self.advance();
             Some(self.expression()?)
         } else {
             None
         };
 
-        if self.token.kind != TokenKind::Semicolon {
-            return Err(self.unexpected_token(format!("{}. Expected ';'.", self.token.get_lexeme())))
+        if self.token.kind == TokenKind::Semicolon {
+            self.advance();
+            Ok(Stmt::Var {name, initializer})
+        } else {
+            Err(self.unexpected_token(format!("{}. Expected ';'.", self.token.get_lexeme())))
         }
-        self.advance();
-
-        Ok(Stmt::Var {name, initializer})
     }
 
     fn statement(&mut self) -> ParserResult<Stmt<'a>> {
@@ -296,6 +300,7 @@ impl<'a> Parser<'a> {
         self.primary()
     }
 
+    #[inline]
     fn primary(&mut self) -> ParserResult<Expr<'a>> {
         let expr = match self.token.kind {
             TokenKind::False => Ok(Expr::Literal(Literal::Bool(false))), 
@@ -325,6 +330,7 @@ impl<'a> Parser<'a> {
         expr
     }
 
+    #[inline]
     fn binary_operator(&mut self) -> ParserResult<BinaryOp> {
         let kind = match self.token.kind {
             TokenKind::Plus => Ok(BinaryOpKind::Add),
@@ -348,6 +354,7 @@ impl<'a> Parser<'a> {
         })
     }
 
+    #[inline(always)]
     fn unary_operator(&mut self) -> ParserResult<UnaryOp> {
         let kind = match self.token.kind {
             TokenKind::Bang => Ok(UnaryOpKind::Not),

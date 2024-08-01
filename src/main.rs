@@ -8,6 +8,7 @@ mod ast_printer;
 mod parser;
 mod interpreter;
 mod stmt;
+mod environment;
 
 use ast_printer::AstPrinter;
 use interpreter::Interpreter;
@@ -88,7 +89,7 @@ fn main() {
                 &file_contents
             );
 
-            let mut interpreter = Interpreter{};
+            let mut interpreter = Interpreter::new();
 
             while !parser.is_at_end() {
                 match parser.parse() {
@@ -127,7 +128,7 @@ fn repl() {
             break;
         }
         let mut parser = Parser::new(&input);
-        let mut interpreter = Interpreter{};
+        let mut interpreter = Interpreter::new();
         match parser.parse() {
             Ok(stmt) => {
                 match interpreter.interpret(stmt) {

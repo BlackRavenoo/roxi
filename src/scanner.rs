@@ -29,6 +29,7 @@ pub struct Scanner<'a> {
 }
 
 impl<'a> Scanner<'a> {
+    #[inline]
     pub fn new(source: &'a str) -> Self {
         Self {
             source,
@@ -38,6 +39,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    #[inline]
     pub fn scan_token(&mut self) -> Token<'a> {
         self.skip_whitespace();
         self.start = self.current;
@@ -85,6 +87,7 @@ impl<'a> Scanner<'a> {
         self.source.as_bytes()[self.current]
     }
 
+    #[inline(always)]
     fn peek_next(&self) -> u8 {
         if self.current < self.source.len() - 1 {
             self.source.as_bytes()[self.current + 1]
@@ -93,6 +96,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    #[inline(always)]
     fn check_next(&mut self, expected: u8) -> bool {
         if !self.is_at_end() && self.peek() == expected {
             self.current += 1;
@@ -109,7 +113,7 @@ impl<'a> Scanner<'a> {
         byte
     }
 
-    #[inline]
+    #[inline(always)]
     fn make_token(&self, kind: TokenKind) -> Token<'a> {
         Token::new(
             kind,
@@ -118,11 +122,12 @@ impl<'a> Scanner<'a> {
         )
     }
 
-    #[inline]
+    #[inline(always)]
     fn error_token(&self, msg: &'static str) -> Token<'a> {
         self.make_token(TokenKind::Error(msg))
     }
 
+    #[inline(always)]
     fn skip_whitespace(&mut self) {
         while !self.is_at_end() {
             let byte = self.peek();
@@ -149,6 +154,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    #[inline(always)]
     fn skip_comment(&mut self) -> bool {
         let mut level = 1;
         while !self.is_at_end() {
@@ -169,6 +175,7 @@ impl<'a> Scanner<'a> {
         false
     }
 
+    #[inline(always)]
     fn parse_string(&mut self) -> Token<'a> {
         while !self.is_at_end() {
             let byte = self.advance();
@@ -181,6 +188,7 @@ impl<'a> Scanner<'a> {
         Token::new(TokenKind::Error("Unterminated string."), "", self.line)
     }
 
+    #[inline(always)]
     fn parse_number(&mut self) -> Token<'a> {
         while !self.is_at_end() && self.peek().is_ascii_digit() {
             self.current += 1;
@@ -197,6 +205,7 @@ impl<'a> Scanner<'a> {
         self.make_token(TokenKind::Number)
     }
 
+    #[inline(always)]
     fn parse_identifier(&mut self) -> Token<'a> {
         while !self.is_at_end() && is_alphanumeric(self.peek()) {
             self.current += 1;
@@ -236,7 +245,7 @@ pub struct Token<'a> {
 }
 
 impl<'a> Token<'a> {
-    #[inline]
+    #[inline(always)]
     fn new(kind: TokenKind, lexeme: &'a str, line: usize) -> Self {
         Self {
             kind,
