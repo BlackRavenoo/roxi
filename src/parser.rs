@@ -6,7 +6,8 @@ use crate::{expr::{BinaryOp, BinaryOpKind, Expr, Literal, UnaryOp, UnaryOpKind},
 enum ErrorKind {
     UnexpectedToken,
     UnmatchedParentheses,
-    MissingLhs
+    MissingLhs,
+    InvalidAssignmentTarget,
 }
 
 #[derive(Debug)]
@@ -35,6 +36,11 @@ impl Display for ParserError {
                 "[line {}] Error: LHS missing for '{}'",
                 self.line,
                 self.msg
+            ),
+            ErrorKind::InvalidAssignmentTarget => write!(
+                f,
+                "[line {}] Error at '=': Invalid assignment target.",
+                self.line
             ),
         }
     }
@@ -197,7 +203,28 @@ impl<'a> Parser<'a> {
             return Err(e)
         }
 
-        self.ternary()
+        self.assignment()
+    }
+
+    fn assignment(&mut self) -> ParserResult<Expr<'a>> {
+        let mut expr = self.ternary()?;
+
+        if self.token.kind == TokenKind::Equal {
+            self.advance();
+            if let Expr::Variable { name } = expr {
+                expr = Expr::Assign { name, value: Box::new(self.assignment()?) }
+            } else {
+                return Err(
+                    ParserError {
+                        msg: String::new(),
+                        line: self.token.get_line(),
+                        kind: ErrorKind::InvalidAssignmentTarget,
+                    }
+                )
+            }
+        }
+
+        Ok(expr)
     }
 
     fn ternary(&mut self) -> ParserResult<Expr<'a>> {

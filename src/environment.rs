@@ -21,6 +21,16 @@ impl Environment {
     }
 
     #[inline]
+    pub fn assign(&mut self, name: &str, value: Value) -> bool {
+        if self.values.contains_key(name) {
+            self.values.insert(name.to_string(), Some(value));
+            true
+        } else {
+            false
+        }
+    }
+    
+    #[inline]
     pub fn get(&self, name: &str) -> Option<&Option<Value>> {
         self.values.get(name)
     }

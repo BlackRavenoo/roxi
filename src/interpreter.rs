@@ -75,6 +75,7 @@ impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
             Expr::Unary { operator, right } => self.visit_unary_expr(operator, *right),
             Expr::Ternary { condition, then_branch, else_branch } => self.visit_ternary_expr(*condition, *then_branch, *else_branch),
             Expr::Variable { name } => self.visit_var_expr(name),
+            Expr::Assign { name, value } => self.visit_assign_expr(name, *value),
         }
     }
 }
@@ -104,6 +105,15 @@ impl Interpreter {
         }
 
         result
+    }
+
+    fn visit_assign_expr(&mut self, name: &str, expr: Expr) -> InterpreterResult<Value> {
+        let value = self.visit_expr(expr)?;
+        if self.environment.assign(name, value.clone()) {
+            Ok(value)
+        } else {
+            todo!() //Error
+        }
     }
 
     fn visit_unary_expr(&mut self, operator: UnaryOp, right: Expr) -> InterpreterResult<Value> {

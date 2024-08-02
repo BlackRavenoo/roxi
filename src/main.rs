@@ -118,6 +118,7 @@ fn main() {
 
 fn repl() {
     let mut input = String::new();
+    let mut interpreter = Interpreter::new();
     loop {
         print!("> ");
         io::stdout().flush().unwrap();
@@ -128,7 +129,6 @@ fn repl() {
             break;
         }
         let mut parser = Parser::new(&input);
-        let mut interpreter = Interpreter::new();
         match parser.parse() {
             Ok(stmt) => {
                 match interpreter.interpret(stmt) {

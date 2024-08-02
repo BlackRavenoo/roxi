@@ -8,6 +8,10 @@ pub trait ExprVisitor<T> {
 
 #[derive(Clone, Debug)]
 pub enum Expr<'a> {
+    Assign {
+        name: &'a str,
+        value: Box<Expr<'a>>
+    },
     Binary {
         left: Box<Expr<'a>>,
         operator: BinaryOp,
@@ -28,7 +32,7 @@ pub enum Expr<'a> {
     },
     Variable {
         name: &'a str,
-    }
+    },
 }
 
 #[derive(Clone, Debug)]
