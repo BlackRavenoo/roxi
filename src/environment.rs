@@ -4,13 +4,16 @@ use wyhash2::WyHash;
 use crate::interpreter::Value;
 
 pub struct Environment {
+    pub enclosing: Option<Box<Environment>>,
     values: HashMap<String, Option<Value>, WyHash>
 }
 
+
 impl Environment {
     #[inline(always)]
-    pub fn new() -> Self {
+    pub fn new(enclosing: Option<Box<Environment>>) -> Self {
         Self {
+            enclosing,
             values: HashMap::with_hasher(WyHash::with_seed(0)),
         }
     }
@@ -26,12 +29,18 @@ impl Environment {
             self.values.insert(name.to_string(), Some(value));
             true
         } else {
-            false
+            self.enclosing
+                .as_mut()
+                .map_or(false, |env| env.assign(name, value))
         }
     }
     
     #[inline]
     pub fn get(&self, name: &str) -> Option<&Option<Value>> {
-        self.values.get(name)
+        self.values.get(name).or_else(|| {
+            self.enclosing
+                .as_ref()
+                .and_then(|enclosing| enclosing.get(name))
+        })
     }
 }

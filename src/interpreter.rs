@@ -5,7 +5,9 @@ use crate::{environment::Environment, expr::{BinaryOp, BinaryOpKind, Expr, ExprV
 #[derive(Debug)]
 enum ErrorKind {
     InvalidOperand(&'static str),
-    DivisionByZero
+    DivisionByZero,
+    UninitializedVariable,
+    UndefinedVariable
 }
 
 #[derive(Debug)]
@@ -29,6 +31,18 @@ impl Display for InterpreterError {
                 f,
                 "[line {}] Error: Division by zero.",
                 self.line,
+            ),
+            ErrorKind::UninitializedVariable => write!(
+                f,
+                "[line {}] Error: Uninitialized variable {}.",
+                self.line,
+                self.msg
+            ),
+            ErrorKind::UndefinedVariable => write!(
+                f,
+                "[line {}] Error: Undefined variable {}.",
+                self.line,
+                self.msg
             ),
         }
     }
@@ -62,31 +76,32 @@ pub struct Interpreter {
 
 impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
     #[inline]
-    fn visit_expr(&mut self, expr: Expr) -> InterpreterResult<Value> {
+    fn visit_expr(&mut self, expr: &Expr) -> InterpreterResult<Value> {
         match expr {
-            Expr::Binary { left, operator, right } => self.visit_binary_expr(*left, operator, *right),
-            Expr::Grouping { expression } => self.visit_expr(*expression),
+            Expr::Binary { left, operator, right } => self.visit_binary_expr(left, operator, right),
+            Expr::Grouping { expression } => self.visit_expr(expression),
             Expr::Literal(literal) => match literal {
-                Literal::Number(num) => Ok(Value::Number(num)),
+                Literal::Number(num) => Ok(Value::Number(*num)),
                 Literal::String(string) => Ok(Value::String(string.to_string())),
-                Literal::Bool(bool) => Ok(Value::Bool(bool)),
+                Literal::Bool(bool) => Ok(Value::Bool(*bool)),
                 Literal::Nil => Ok(Value::Nil),
             },
-            Expr::Unary { operator, right } => self.visit_unary_expr(operator, *right),
-            Expr::Ternary { condition, then_branch, else_branch } => self.visit_ternary_expr(*condition, *then_branch, *else_branch),
-            Expr::Variable { name } => self.visit_var_expr(name),
-            Expr::Assign { name, value } => self.visit_assign_expr(name, *value),
+            Expr::Unary { operator, right } => self.visit_unary_expr(operator, right),
+            Expr::Ternary { condition, then_branch, else_branch } => self.visit_ternary_expr(condition, then_branch, else_branch),
+            Expr::Variable { name, line } => self.visit_var_expr(name, line),
+            Expr::Assign { name, value, line } => self.visit_assign_expr(name, value, line),
         }
     }
 }
 
 impl StmtVisitor<InterpreterResult<()>> for Interpreter {
     #[inline]
-    fn visit_stmt(&mut self, stmt: Stmt) -> InterpreterResult<()> {
+    fn visit_stmt(&mut self, stmt: &Stmt) -> InterpreterResult<()> {
         match stmt {
             Stmt::Expr(expr) => self.visit_expr_stmt(expr),
             Stmt::Print(expr) => self.visit_print_stmt(expr),
             Stmt::Var { name, initializer } => self.visit_var_stmt(name, initializer),
+            Stmt::Block { statements } => self.visit_block_stmt(statements),
         }
     }
 }
@@ -95,10 +110,10 @@ impl Interpreter {
     #[inline(always)]
     pub fn new() -> Self {
         Self {
-            environment: Environment::new()
+            environment: Environment::new(None)
         }
     }
-    pub fn interpret(&mut self, stmt: Stmt) -> InterpreterResult<()> {
+    pub fn interpret(&mut self, stmt: &Stmt) -> InterpreterResult<()> {
         let result = self.visit_stmt(stmt);
         if let Err(ref e) = result {
             eprintln!("{}", e);
@@ -107,16 +122,20 @@ impl Interpreter {
         result
     }
 
-    fn visit_assign_expr(&mut self, name: &str, expr: Expr) -> InterpreterResult<Value> {
+    fn visit_assign_expr(&mut self, name: &str, expr: &Expr, line: &usize) -> InterpreterResult<Value> {
         let value = self.visit_expr(expr)?;
         if self.environment.assign(name, value.clone()) {
             Ok(value)
         } else {
-            todo!() //Error
+            Err(InterpreterError{
+                msg: name.to_owned(),
+                line: *line,
+                kind: ErrorKind::UndefinedVariable,
+            })
         }
     }
 
-    fn visit_unary_expr(&mut self, operator: UnaryOp, right: Expr) -> InterpreterResult<Value> {
+    fn visit_unary_expr(&mut self, operator: &UnaryOp, right: &Expr) -> InterpreterResult<Value> {
         let right = self.visit_expr(right)?;
         
         match operator.kind {
@@ -130,7 +149,7 @@ impl Interpreter {
         }
     }
 
-    fn visit_binary_expr(&mut self, left: Expr, operator: BinaryOp, right: Expr) -> InterpreterResult<Value> {
+    fn visit_binary_expr(&mut self, left: &Expr, operator: &BinaryOp, right: &Expr) -> InterpreterResult<Value> {
         let (left, right) = (self.visit_expr(left)?, self.visit_expr(right)?);
 
         match operator.kind {
@@ -189,7 +208,7 @@ impl Interpreter {
         }
     }
 
-    fn visit_ternary_expr(&mut self, condition: Expr, then_branch: Expr, else_branch: Expr) -> InterpreterResult<Value> {
+    fn visit_ternary_expr(&mut self, condition: &Expr, then_branch: &Expr, else_branch: &Expr) -> InterpreterResult<Value> {
         let result = self.visit_expr(condition)?;
         self.visit_expr(match Self::is_truthy(&result) {
             true => then_branch,
@@ -197,29 +216,41 @@ impl Interpreter {
         })
     }
 
-    fn visit_var_expr(&mut self, name: &str) -> InterpreterResult<Value> {
+    fn visit_var_expr(&mut self, name: &str, line: &usize) -> InterpreterResult<Value> {
         match self.environment.get(name) {
             Some(Some(value)) => Ok(value.clone()),
-            Some(None) => todo!(), //Err
-            None => todo!(), //Err
+            Some(None) => Err(InterpreterError{
+                msg: name.to_owned(),
+                line: *line,
+                kind: ErrorKind::UninitializedVariable,
+            }),
+            None => Err(InterpreterError{
+                msg: name.to_owned(),
+                line: *line,
+                kind: ErrorKind::UndefinedVariable,
+            }),
         }
     }
 
     #[inline]
-    fn visit_expr_stmt(&mut self, expr: Expr) -> InterpreterResult<()> {
+    fn visit_expr_stmt(&mut self, expr: &Expr) -> InterpreterResult<()> {
         let _ = self.visit_expr(expr)?;
         Ok(())
     }
 
     #[inline]
-    fn visit_print_stmt(&mut self, expr: Expr) -> InterpreterResult<()> {
+    fn visit_print_stmt(&mut self, expr: &Expr) -> InterpreterResult<()> {
         let value = self.visit_expr(expr)?;
         println!("{}", value);
         Ok(())
     }
+    
+    fn visit_block_stmt(&mut self, statements: &[Stmt]) -> InterpreterResult<()> {
+        self.execute_block(statements)
+    }
 
     #[inline]
-    fn visit_var_stmt(&mut self, name: &str, initializer: Option<Expr>) -> InterpreterResult<()> {
+    fn visit_var_stmt(&mut self, name: &str, initializer: &Option<Expr>) -> InterpreterResult<()> {
         let value = if let Some(expr) = initializer {
             Some(self.visit_expr(expr)?)
         } else {
@@ -266,5 +297,24 @@ impl Interpreter {
                 kind: ErrorKind::InvalidOperand(expected),
             }
         )
+    }
+
+    fn execute_block(&mut self, statements: &[Stmt]) -> InterpreterResult<()> {
+        // unsafe {
+        //     let enclosing = ptr::read(&self.environment);
+        //     let env = Environment::new(Some(Box::new(enclosing)));
+        //     ptr::write(&mut self.environment, env)
+        // }
+
+        let old_env = std::mem::replace(&mut self.environment, Environment::new(None));
+        self.environment.enclosing = Some(Box::new(old_env));
+
+        for stmt in statements {
+            self.visit_stmt(stmt)?;
+        }
+
+        self.environment =  std::mem::take(&mut self.environment.enclosing).map(|e| *e).unwrap();
+
+        Ok(())
     }
 }

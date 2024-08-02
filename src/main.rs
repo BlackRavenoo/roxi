@@ -94,7 +94,7 @@ fn main() {
             while !parser.is_at_end() {
                 match parser.parse() {
                     Ok(expr) => {
-                        match interpreter.interpret(expr) {
+                        match interpreter.interpret(&expr) {
                             Ok(_) => (),
                             Err(_) => exit_code = 70,
                         }
@@ -131,7 +131,7 @@ fn repl() {
         let mut parser = Parser::new(&input);
         match parser.parse() {
             Ok(stmt) => {
-                match interpreter.interpret(stmt) {
+                match interpreter.interpret(&stmt) {
                     Ok(_) => (),
                     Err(e) => eprintln!("{}", e),
                 }

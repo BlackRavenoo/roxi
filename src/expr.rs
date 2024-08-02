@@ -3,13 +3,14 @@ pub trait Visitor<T> {
 }
 
 pub trait ExprVisitor<T> {
-    fn visit_expr(&mut self, expr: Expr) -> T;
+    fn visit_expr(&mut self, expr: &Expr) -> T;
 }
 
 #[derive(Clone, Debug)]
 pub enum Expr<'a> {
     Assign {
         name: &'a str,
+        line: usize,
         value: Box<Expr<'a>>
     },
     Binary {
@@ -32,6 +33,7 @@ pub enum Expr<'a> {
     },
     Variable {
         name: &'a str,
+        line: usize
     },
 }
 

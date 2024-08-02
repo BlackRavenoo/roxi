@@ -154,6 +154,7 @@ impl<'a> Parser<'a> {
     fn statement(&mut self) -> ParserResult<Stmt<'a>> {
         match self.token.kind {
             TokenKind::Print => self.print_statement(),
+            TokenKind::LeftBrace => Ok(Stmt::Block{statements: self.block()?}),
             _ => self.expr_statement()
         }
     }
@@ -167,6 +168,21 @@ impl<'a> Parser<'a> {
         self.advance();
 
         Ok(statement)
+    }
+
+    fn block(&mut self) -> ParserResult<Vec<Stmt<'a>>> {
+        self.advance();
+        let mut statements = Vec::with_capacity(32);
+        while !self.is_at_end() && self.token.kind != TokenKind::RightBrace {
+            statements.push(self.declaration()?);
+        }
+
+        if self.token.kind != TokenKind::RightBrace {
+            todo!() //Err
+        } else {
+            self.advance();
+            Ok(statements)
+        }
     }
 
     fn expr_statement(&mut self) -> ParserResult<Stmt<'a>> {
@@ -211,8 +227,8 @@ impl<'a> Parser<'a> {
 
         if self.token.kind == TokenKind::Equal {
             self.advance();
-            if let Expr::Variable { name } = expr {
-                expr = Expr::Assign { name, value: Box::new(self.assignment()?) }
+            if let Expr::Variable { name, line } = expr {
+                expr = Expr::Assign { name, value: Box::new(self.assignment()?), line }
             } else {
                 return Err(
                     ParserError {
@@ -350,7 +366,7 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Expr::Grouping {expression: Box::new(expr)})
             }
-            TokenKind::Identifier => Ok(Expr::Variable {name: self.token.get_lexeme()}),
+            TokenKind::Identifier => Ok(Expr::Variable {name: self.token.get_lexeme(), line: self.token.get_line()}),
             _ => return Err(self.unexpected_token(self.token.get_lexeme().to_owned()))
         };
         self.advance();
