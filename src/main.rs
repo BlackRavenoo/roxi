@@ -133,7 +133,7 @@ fn repl() {
             Ok(stmt) => {
                 match interpreter.interpret(&stmt) {
                     Ok(_) => (),
-                    Err(e) => eprintln!("{}", e),
+                    Err(_) => (),
                 }
             },
             Err(_) => (),

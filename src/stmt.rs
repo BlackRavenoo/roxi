@@ -14,5 +14,10 @@ pub enum Stmt<'a> {
     },
     Block {
         statements: Vec<Stmt<'a>>
+    },
+    If {
+        condition: Box<Expr<'a>>,
+        then_branch: Box<Stmt<'a>>,
+        else_branch: Option<Box<Stmt<'a>>>
     }
 }

@@ -102,6 +102,7 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
             Stmt::Print(expr) => self.visit_print_stmt(expr),
             Stmt::Var { name, initializer } => self.visit_var_stmt(name, initializer),
             Stmt::Block { statements } => self.visit_block_stmt(statements),
+            Stmt::If { condition, then_branch, else_branch } => self.visit_if_stmt(condition, then_branch, else_branch),
         }
     }
 }
@@ -245,10 +246,6 @@ impl Interpreter {
         Ok(())
     }
     
-    fn visit_block_stmt(&mut self, statements: &[Stmt]) -> InterpreterResult<()> {
-        self.execute_block(statements)
-    }
-
     #[inline]
     fn visit_var_stmt(&mut self, name: &str, initializer: &Option<Expr>) -> InterpreterResult<()> {
         let value = if let Some(expr) = initializer {
@@ -256,10 +253,25 @@ impl Interpreter {
         } else {
             None
         };
-
+        
         self.environment.define(name, value);
-
+        
         Ok(())
+    }
+    
+    #[inline(always)]
+    fn visit_block_stmt(&mut self, statements: &[Stmt]) -> InterpreterResult<()> {
+        self.execute_block(statements)
+    }
+
+    fn visit_if_stmt(&mut self, condition: &Expr, then_branch: &Stmt, else_branch: &Option<Box<Stmt>>) -> InterpreterResult<()> {
+        if Self::is_truthy(&self.visit_expr(condition)?) {
+            self.visit_stmt(then_branch)
+        } else if let Some(stmt) = &else_branch {
+            self.visit_stmt(stmt)
+        } else {
+            Ok(())
+        }
     }
 
     #[inline(always)]

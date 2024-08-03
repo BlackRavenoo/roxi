@@ -22,7 +22,7 @@ impl Display for ParserError {
         match self.kind {
             ErrorKind::UnexpectedToken => write!(
                 f,
-                "[line {}] Error: Unexpected '{}'",
+                "[line {}] Error: Unexpected {}",
                 self.line,
                 self.msg
             ),
@@ -103,7 +103,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn parse(&mut self) -> ParserResult<Stmt<'a>> {
         self.declaration()
     }
@@ -131,7 +131,7 @@ impl<'a> Parser<'a> {
         let name = if let TokenKind::Identifier = self.token.kind {
             self.token.get_lexeme()
         } else {
-            return Err(self.unexpected_token(format!("{}. Expected variable name.", self.token.get_lexeme())));
+            return Err(self.unexpected_token(format!("'{}'. Expected variable name.", self.token.get_lexeme())));
         };
 
         self.advance();
@@ -147,7 +147,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Ok(Stmt::Var {name, initializer})
         } else {
-            Err(self.unexpected_token(format!("{}. Expected ';'.", self.token.get_lexeme())))
+            Err(self.unexpected_token(format!("'{}'. Expected ';'.", self.token.get_lexeme())))
         }
     }
 
@@ -155,6 +155,7 @@ impl<'a> Parser<'a> {
         match self.token.kind {
             TokenKind::Print => self.print_statement(),
             TokenKind::LeftBrace => Ok(Stmt::Block{statements: self.block()?}),
+            TokenKind::If => self.if_statement(),
             _ => self.expr_statement()
         }
     }
@@ -163,7 +164,7 @@ impl<'a> Parser<'a> {
         self.advance();
         let statement = Stmt::Print(self.expression()?);
         if self.token.kind != TokenKind::Semicolon {
-            return Err(self.unexpected_token(format!("{}. Expected ';'.", self.token.get_lexeme())))
+            return Err(self.unexpected_token(format!("'{}'. Expected ';'.", self.token.get_lexeme())))
         }
         self.advance();
 
@@ -178,17 +179,44 @@ impl<'a> Parser<'a> {
         }
 
         if self.token.kind != TokenKind::RightBrace {
-            todo!() //Err
+            Err(self.unexpected_token(format!("'{}'. Expected '}}' after block.", self.token.get_lexeme())))
         } else {
             self.advance();
             Ok(statements)
         }
     }
 
+    fn if_statement(&mut self) -> ParserResult<Stmt<'a>> {
+        self.advance();
+        if self.token.kind != TokenKind::LeftParen {
+            return Err(self.unexpected_token(format!("'{}'. Expected '('.", self.token.get_lexeme())))
+        }
+        self.advance();
+        let condition = self.expression()?;
+        if self.token.kind != TokenKind::RightParen {
+            return Err(self.unexpected_token(format!("'{}'. Expected ')'.", self.token.get_lexeme())))
+        }
+        self.advance();
+
+        let then_branch = self.statement()?;
+        let else_branch = if self.token.kind == TokenKind::Else {
+            self.advance();
+            Some(Box::new(self.statement()?))
+        } else {
+            None
+        };
+        
+        Ok(Stmt::If {
+            condition: Box::new(condition),
+            then_branch: Box::new(then_branch),
+            else_branch: else_branch
+        })
+    }
+
     fn expr_statement(&mut self) -> ParserResult<Stmt<'a>> {
         let statement = Stmt::Expr(self.expression()?);
         if self.token.kind != TokenKind::Semicolon {
-            return Err(self.unexpected_token(format!("{}. Expected ';'.", self.token.get_lexeme())))
+            return Err(self.unexpected_token(format!("'{}'. Expected ';'.", self.token.get_lexeme())))
         }
         self.advance();
         
@@ -251,7 +279,7 @@ impl<'a> Parser<'a> {
             let then_branch = self.equality()?;
             
             if self.token.kind != TokenKind::Colon {
-                return Err(self.unexpected_token(format!("{}. Expected ':'.", self.token.get_lexeme())))
+                return Err(self.unexpected_token(format!("'{}'. Expected ':'.", self.token.get_lexeme())))
             }
             self.advance();
             let else_branch = self.equality()?;
@@ -367,7 +395,7 @@ impl<'a> Parser<'a> {
                 Ok(Expr::Grouping {expression: Box::new(expr)})
             }
             TokenKind::Identifier => Ok(Expr::Variable {name: self.token.get_lexeme(), line: self.token.get_line()}),
-            _ => return Err(self.unexpected_token(self.token.get_lexeme().to_owned()))
+            _ => return Err(self.unexpected_token(format!("'{}'", self.token.get_lexeme())))
         };
         self.advance();
         expr
@@ -388,7 +416,7 @@ impl<'a> Parser<'a> {
             TokenKind::GreaterEqual => Ok(BinaryOpKind::Ge),
             TokenKind::And => Ok(BinaryOpKind::And),
             TokenKind::Or => Ok(BinaryOpKind::Or),
-            _ => return Err(self.unexpected_token(format!("{}. Expected binary operator.", self.token.get_lexeme())))
+            _ => return Err(self.unexpected_token(format!("'{}'. Expected binary operator.", self.token.get_lexeme())))
         }?;
         self.advance();
         Ok(BinaryOp {
@@ -402,7 +430,7 @@ impl<'a> Parser<'a> {
         let kind = match self.token.kind {
             TokenKind::Bang => Ok(UnaryOpKind::Not),
             TokenKind::Minus => Ok(UnaryOpKind::Neg),
-            _ => return Err(self.unexpected_token(format!("{}. Expected unary operator.", self.token.get_lexeme())))
+            _ => return Err(self.unexpected_token(format!("'{}'. Expected unary operator.", self.token.get_lexeme())))
         }?;
         self.advance();
         Ok(UnaryOp {
