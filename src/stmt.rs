@@ -23,5 +23,8 @@ pub enum Stmt<'a> {
     While {
         condition: Expr<'a>,
         body: Box<Stmt<'a>>
+    },
+    Break {
+        line: usize 
     }
 }

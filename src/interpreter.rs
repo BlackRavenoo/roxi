@@ -7,7 +7,8 @@ enum ErrorKind {
     InvalidOperand(&'static str),
     DivisionByZero,
     UninitializedVariable,
-    UndefinedVariable
+    UndefinedVariable,
+    Break
 }
 
 #[derive(Debug)]
@@ -43,6 +44,11 @@ impl Display for InterpreterError {
                 "[line {}] Error: Undefined variable {}.",
                 self.line,
                 self.msg
+            ),
+            ErrorKind::Break => write!(
+                f,
+                "[line {}] Error: `break` executed outside a enclosing loop.",
+                self.line
             ),
         }
     }
@@ -105,6 +111,7 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
             Stmt::Block { statements } => self.visit_block_stmt(statements),
             Stmt::If { condition, then_branch, else_branch } => self.visit_if_stmt(condition, then_branch, else_branch),
             Stmt::While { condition, body } => self.visit_while_stmt(condition, body),
+            Stmt::Break { line } => self.visit_break_stmt(line),
         }
     }
 }
@@ -301,10 +308,22 @@ impl Interpreter {
     #[inline(always)]
     fn visit_while_stmt(&mut self, condition: &Expr, body: &Stmt) -> InterpreterResult<()> {
         while Self::is_truthy(&self.visit_expr(condition)?) {
-            self.visit_stmt(body)?;
+            match self.visit_stmt(body) {
+                Err(InterpreterError { kind: ErrorKind::Break, .. }) => return Ok(()),
+                res => res?,
+            };
         }
         Ok(())
     }
+
+    #[inline(always)]
+    fn visit_break_stmt(&mut self, line: &usize) -> InterpreterResult<()> {
+        Err(InterpreterError {
+            msg: String::new(),
+            line: *line,
+            kind: ErrorKind::Break,
+        })
+    } 
 
     #[inline(always)]
     fn is_truthy(value: &Value) -> bool {

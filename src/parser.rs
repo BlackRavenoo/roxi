@@ -8,6 +8,7 @@ enum ErrorKind {
     UnmatchedParentheses,
     MissingLhs,
     InvalidAssignmentTarget,
+    BreakOutsideLoop
 }
 
 #[derive(Debug)]
@@ -42,6 +43,11 @@ impl Display for ParserError {
                 "[line {}] Error at '=': Invalid assignment target.",
                 self.line
             ),
+            ErrorKind::BreakOutsideLoop => write!(
+                f,
+                "[line {}] Error: `break` appeared outside a enclosing loop.",
+                self.line
+            ),
         }
     }
 }
@@ -51,6 +57,7 @@ type ParserResult<T> = Result<T, ParserError>;
 pub struct Parser<'a> {
     scanner: Scanner<'a>,
     token: Token<'a>,
+    loop_depth: u16
 }
 
 impl<'a> Parser<'a> {
@@ -63,6 +70,7 @@ impl<'a> Parser<'a> {
         Self {
             token: scanner.scan_token(),
             scanner,
+            loop_depth: 0,
         }
     }
 
@@ -156,6 +164,7 @@ impl<'a> Parser<'a> {
             TokenKind::Print => self.print_statement(),
             TokenKind::While => self.while_statement(),
             TokenKind::For => self.for_statement(),
+            TokenKind::Break => self.break_statement(),
             TokenKind::LeftBrace => {
                 let mut block = self.block()?;
                 if block.len() == 1 { // Optimization
@@ -186,12 +195,17 @@ impl<'a> Parser<'a> {
             return Err(self.unexpected_token(format!("'{}'. Expected '('.", self.token.get_lexeme())))
         }
         self.advance();
+        
         let condition = self.expression()?;
+
         if self.token.kind != TokenKind::RightParen {
             return Err(self.unexpected_token(format!("'{}'. Expected ')'.", self.token.get_lexeme())))
         }
         self.advance();
+
+        self.loop_depth += 1;
         let body = self.statement()?;
+        self.loop_depth -= 1;
 
         Ok(Stmt::While {
             condition,
@@ -235,7 +249,9 @@ impl<'a> Parser<'a> {
         }
         self.advance();
 
+        self.loop_depth += 1;
         let mut body = self.statement()?;
+        self.loop_depth -= 1;
 
         if let Some(increment) = increment {
             if let Stmt::Block { ref mut statements } = body {
@@ -255,6 +271,28 @@ impl<'a> Parser<'a> {
         };
 
         Ok(body)
+
+    }
+
+    fn break_statement(&mut self) -> ParserResult<Stmt<'a>> {
+        let line = self.token.get_line();
+        
+        self.advance();
+
+        if self.token.kind != TokenKind::Semicolon {
+            return Err(self.unexpected_token(format!("'{}'. Expected ';'.", self.token.get_lexeme())))
+        }
+
+        if self.loop_depth > 0 {
+            self.advance();
+            Ok(Stmt::Break { line: self.token.get_line() })
+        } else {
+            Err(ParserError {
+                msg: String::new(),
+                line,
+                kind: ErrorKind::BreakOutsideLoop,
+            })
+        }
 
     }
 

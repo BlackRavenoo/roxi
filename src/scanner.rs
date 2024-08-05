@@ -17,6 +17,7 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf::phf_map!(
     "true" => TokenKind::True,
     "var" => TokenKind::Var,
     "while" => TokenKind::While,
+    "break" => TokenKind::Break,
 );
 
 pub struct Scanner<'a> {
@@ -350,6 +351,7 @@ pub enum TokenKind {
     True,
     Var,
     While,
+    Break,
     
     EOF,
 
@@ -400,6 +402,7 @@ impl Display for TokenKind {
             TokenKind::EOF => "EOF",
             TokenKind::QuestionMark => "QUESTION_MARK",
             TokenKind::Colon => "COLON",
+            TokenKind::Break => "BREAK",
             TokenKind::Error(_) => todo!(),
         };
         write!(f, "{}", result)
