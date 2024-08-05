@@ -14,7 +14,7 @@ impl Environment {
     pub fn new(enclosing: Option<Box<Environment>>) -> Self {
         Self {
             enclosing,
-            values: HashMap::with_hasher(WyHash::with_seed(0)),
+            values: HashMap::with_hasher(WyHash::with_seed(594)),
         }
     }
 
@@ -26,7 +26,7 @@ impl Environment {
     #[inline]
     pub fn assign(&mut self, name: &str, value: Value) -> bool {
         if self.values.contains_key(name) {
-            self.values.insert(name.to_string(), Some(value));
+            self.values.entry(name.to_string()).or_insert(None).replace(value);
             true
         } else {
             self.enclosing

@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, ptr};
 
 use crate::{environment::Environment, expr::{BinaryOp, BinaryOpKind, Expr, ExprVisitor, Literal, UnaryOp, UnaryOpKind}, stmt::{Stmt, StmtVisitor}};
 
@@ -75,10 +75,10 @@ pub struct Interpreter {
 }
 
 impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
-    #[inline]
+    #[inline(always)]
     fn visit_expr(&mut self, expr: &Expr) -> InterpreterResult<Value> {
         match expr {
-            Expr::Binary { left, operator, right } => self.visit_binary_expr(left, operator, right),
+            Expr::Binary { values, operator } => self.visit_binary_expr(&values.0, operator, &values.1),
             Expr::Grouping { expression } => self.visit_expr(expression),
             Expr::Literal(literal) => match literal {
                 Literal::Number(num) => Ok(Value::Number(*num)),
@@ -87,15 +87,16 @@ impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
                 Literal::Nil => Ok(Value::Nil),
             },
             Expr::Unary { operator, right } => self.visit_unary_expr(operator, right),
-            Expr::Ternary { condition, then_branch, else_branch } => self.visit_ternary_expr(condition, then_branch, else_branch),
+            Expr::Ternary { exprs } => self.visit_ternary_expr(&exprs.0, &exprs.1, &exprs.2),
             Expr::Variable { name, line } => self.visit_var_expr(name, line),
             Expr::Assign { name, value, line } => self.visit_assign_expr(name, value, line),
+            Expr::Logical { values, operator } => self.visit_logical_expr(&values.0, operator, &values.1),
         }
     }
 }
 
 impl StmtVisitor<InterpreterResult<()>> for Interpreter {
-    #[inline]
+    #[inline(always)]
     fn visit_stmt(&mut self, stmt: &Stmt) -> InterpreterResult<()> {
         match stmt {
             Stmt::Expr(expr) => self.visit_expr_stmt(expr),
@@ -103,6 +104,7 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
             Stmt::Var { name, initializer } => self.visit_var_stmt(name, initializer),
             Stmt::Block { statements } => self.visit_block_stmt(statements),
             Stmt::If { condition, then_branch, else_branch } => self.visit_if_stmt(condition, then_branch, else_branch),
+            Stmt::While { condition, body } => self.visit_while_stmt(condition, body),
         }
     }
 }
@@ -123,6 +125,7 @@ impl Interpreter {
         result
     }
 
+    #[inline(always)]
     fn visit_assign_expr(&mut self, name: &str, expr: &Expr, line: &usize) -> InterpreterResult<Value> {
         let value = self.visit_expr(expr)?;
         if self.environment.assign(name, value.clone()) {
@@ -136,6 +139,22 @@ impl Interpreter {
         }
     }
 
+    #[inline(always)]
+    fn visit_logical_expr(&mut self, left: &Expr, operator: &BinaryOp, right: &Expr) -> InterpreterResult<Value> {
+        let left = self.visit_expr(left)?;
+
+        if operator.kind == BinaryOpKind::Or {
+            if Self::is_truthy(&left) {
+                return Ok(left);
+            }
+        } else if !Self::is_truthy(&left) {
+            return Ok(left)
+        }
+
+        self.visit_expr(right)
+    }
+
+    #[inline(always)]
     fn visit_unary_expr(&mut self, operator: &UnaryOp, right: &Expr) -> InterpreterResult<Value> {
         let right = self.visit_expr(right)?;
         
@@ -150,6 +169,7 @@ impl Interpreter {
         }
     }
 
+    #[inline(always)]
     fn visit_binary_expr(&mut self, left: &Expr, operator: &BinaryOp, right: &Expr) -> InterpreterResult<Value> {
         let (left, right) = (self.visit_expr(left)?, self.visit_expr(right)?);
 
@@ -204,11 +224,13 @@ impl Interpreter {
                 (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
                 (v, _) => Self::invalid_operand(&v, "number", operator.line)
             },
-            BinaryOpKind::And => Ok(Value::Bool(Self::is_truthy(&left) && Self::is_truthy(&right))),
-            BinaryOpKind::Or => Ok(Value::Bool(Self::is_truthy(&left) || Self::is_truthy(&right))),
+            _ => unreachable!()
+            // BinaryOpKind::And => Ok(Value::Bool(Self::is_truthy(&left) && Self::is_truthy(&right))),
+            // BinaryOpKind::Or => Ok(Value::Bool(Self::is_truthy(&left) || Self::is_truthy(&right))),
         }
     }
 
+    #[inline(always)]
     fn visit_ternary_expr(&mut self, condition: &Expr, then_branch: &Expr, else_branch: &Expr) -> InterpreterResult<Value> {
         let result = self.visit_expr(condition)?;
         self.visit_expr(match Self::is_truthy(&result) {
@@ -217,6 +239,7 @@ impl Interpreter {
         })
     }
 
+    #[inline(always)]
     fn visit_var_expr(&mut self, name: &str, line: &usize) -> InterpreterResult<Value> {
         match self.environment.get(name) {
             Some(Some(value)) => Ok(value.clone()),
@@ -233,20 +256,20 @@ impl Interpreter {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn visit_expr_stmt(&mut self, expr: &Expr) -> InterpreterResult<()> {
         let _ = self.visit_expr(expr)?;
         Ok(())
     }
 
-    #[inline]
+    #[inline(always)]
     fn visit_print_stmt(&mut self, expr: &Expr) -> InterpreterResult<()> {
         let value = self.visit_expr(expr)?;
         println!("{}", value);
         Ok(())
     }
     
-    #[inline]
+    #[inline(always)]
     fn visit_var_stmt(&mut self, name: &str, initializer: &Option<Expr>) -> InterpreterResult<()> {
         let value = if let Some(expr) = initializer {
             Some(self.visit_expr(expr)?)
@@ -264,6 +287,7 @@ impl Interpreter {
         self.execute_block(statements)
     }
 
+    #[inline(always)]
     fn visit_if_stmt(&mut self, condition: &Expr, then_branch: &Stmt, else_branch: &Option<Box<Stmt>>) -> InterpreterResult<()> {
         if Self::is_truthy(&self.visit_expr(condition)?) {
             self.visit_stmt(then_branch)
@@ -272,6 +296,14 @@ impl Interpreter {
         } else {
             Ok(())
         }
+    }
+
+    #[inline(always)]
+    fn visit_while_stmt(&mut self, condition: &Expr, body: &Stmt) -> InterpreterResult<()> {
+        while Self::is_truthy(&self.visit_expr(condition)?) {
+            self.visit_stmt(body)?;
+        }
+        Ok(())
     }
 
     #[inline(always)]
@@ -311,15 +343,18 @@ impl Interpreter {
         )
     }
 
+    #[inline(always)]
     fn execute_block(&mut self, statements: &[Stmt]) -> InterpreterResult<()> {
-        // unsafe {
-        //     let enclosing = ptr::read(&self.environment);
-        //     let env = Environment::new(Some(Box::new(enclosing)));
-        //     ptr::write(&mut self.environment, env)
-        // }
+        // SAFETY: We read from `self.environment` and write env into it.
+        // Old env is not duplicated, nothing is dropped
+        unsafe {
+            let enclosing = ptr::read(&self.environment);
+            let env = Environment::new(Some(Box::new(enclosing)));
+            ptr::write(&mut self.environment, env)
+        }
 
-        let old_env = std::mem::replace(&mut self.environment, Environment::new(None));
-        self.environment.enclosing = Some(Box::new(old_env));
+        // let old_env = std::mem::replace(&mut self.environment, Environment::new(None));
+        // self.environment.enclosing = Some(Box::new(old_env));
 
         for stmt in statements {
             self.visit_stmt(stmt)?;

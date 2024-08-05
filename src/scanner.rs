@@ -301,7 +301,7 @@ impl<'a> Debug for Token<'a> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum TokenKind {
     // Single-character tokens.
     LeftParen,

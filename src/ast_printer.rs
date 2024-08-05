@@ -24,7 +24,7 @@ fn parenthesize(str: &str, exprs: &[&Expr]) -> String {
 impl Visitor<String> for AstPrinter {
     fn visit(expr: &Expr) -> String {
         match expr {
-            Expr::Binary { left, operator, right } => parenthesize(operator.kind.as_str(), &[left, right]),
+            Expr::Binary { values, operator } => parenthesize(operator.kind.as_str(), &[&values.0, &values.1]),
             Expr::Grouping { expression } => parenthesize("group", &[expression]),
             Expr::Literal(value) => match value {
                 Literal::Number(num) => {
@@ -39,9 +39,10 @@ impl Visitor<String> for AstPrinter {
                 Literal::Nil => "nil".to_string(),
             },
             Expr::Unary { operator, right } => parenthesize(operator.kind.as_str(), &[right]),
-            Expr::Ternary { condition, then_branch, else_branch } => parenthesize("ternary", &[condition, then_branch, else_branch]),
+            Expr::Ternary { exprs } => parenthesize("ternary", &[&exprs.0, &exprs.1, &exprs.2]),
             Expr::Variable { .. } => todo!(),
             Expr::Assign { .. } => todo!(),
+            Expr::Logical { .. } => todo!(),
         }
     }
 }

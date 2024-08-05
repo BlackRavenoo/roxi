@@ -14,9 +14,8 @@ pub enum Expr<'a> {
         value: Box<Expr<'a>>
     },
     Binary {
-        left: Box<Expr<'a>>,
-        operator: BinaryOp,
-        right: Box<Expr<'a>>,
+        values: Box<(Expr<'a>, Expr<'a>)>,
+        operator: BinaryOp
     },
     Grouping {
         expression: Box<Expr<'a>>,
@@ -27,14 +26,16 @@ pub enum Expr<'a> {
         right: Box<Expr<'a>>,
     },
     Ternary {
-        condition: Box<Expr<'a>>,
-        then_branch: Box<Expr<'a>>,
-        else_branch: Box<Expr<'a>>
+        exprs: Box<(Expr<'a>, Expr<'a>, Expr<'a>)>,
     },
     Variable {
         name: &'a str,
         line: usize
     },
+    Logical {
+        values: Box<(Expr<'a>, Expr<'a>)>,
+        operator: BinaryOp
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -49,7 +50,7 @@ pub struct UnaryOp {
     pub kind: UnaryOpKind
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BinaryOpKind {
     Add,
     Sub,

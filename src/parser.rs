@@ -154,7 +154,16 @@ impl<'a> Parser<'a> {
     fn statement(&mut self) -> ParserResult<Stmt<'a>> {
         match self.token.kind {
             TokenKind::Print => self.print_statement(),
-            TokenKind::LeftBrace => Ok(Stmt::Block{statements: self.block()?}),
+            TokenKind::While => self.while_statement(),
+            TokenKind::For => self.for_statement(),
+            TokenKind::LeftBrace => {
+                let mut block = self.block()?;
+                if block.len() == 1 { // Optimization
+                    Ok(block.swap_remove(0))
+                } else {
+                    Ok(Stmt::Block{statements: block})
+                }
+            },
             TokenKind::If => self.if_statement(),
             _ => self.expr_statement()
         }
@@ -171,9 +180,87 @@ impl<'a> Parser<'a> {
         Ok(statement)
     }
 
+    fn while_statement(&mut self) -> ParserResult<Stmt<'a>> {
+        self.advance();
+        if self.token.kind != TokenKind::LeftParen {
+            return Err(self.unexpected_token(format!("'{}'. Expected '('.", self.token.get_lexeme())))
+        }
+        self.advance();
+        let condition = self.expression()?;
+        if self.token.kind != TokenKind::RightParen {
+            return Err(self.unexpected_token(format!("'{}'. Expected ')'.", self.token.get_lexeme())))
+        }
+        self.advance();
+        let body = self.statement()?;
+
+        Ok(Stmt::While {
+            condition,
+            body: Box::new(body)
+        })
+    }
+
+    fn for_statement(&mut self) -> ParserResult<Stmt<'a>> {
+        self.advance();
+        if self.token.kind != TokenKind::LeftParen {
+            return Err(self.unexpected_token(format!("'{}'. Expected '('.", self.token.get_lexeme())))
+        }
+        self.advance();
+
+        let initializer = match self.token.kind {
+            TokenKind::Semicolon => {
+                self.advance();
+                None
+            },
+            TokenKind::Var => Some(self.var_declaration()?),
+            _ => Some(self.expr_statement()?),
+        };
+
+        let condition = match self.token.kind {
+            TokenKind::Semicolon => Expr::Literal(Literal::Bool(true)),
+            _ => self.expression()?
+        };
+
+        if self.token.kind != TokenKind::Semicolon {
+            return Err(self.unexpected_token(format!("'{}'. Expected ';'.", self.token.get_lexeme())))
+        }
+        self.advance();
+
+        let increment = match self.token.kind {
+            TokenKind::RightParen => None,
+            _ => Some(self.expression()?)
+        };
+        
+        if self.token.kind != TokenKind::RightParen {
+            return Err(self.unexpected_token(format!("'{}'. Expected ')'.", self.token.get_lexeme())))
+        }
+        self.advance();
+
+        let mut body = self.statement()?;
+
+        if let Some(increment) = increment {
+            if let Stmt::Block { ref mut statements } = body {
+                statements.push(Stmt::Expr(increment));
+            } else {
+                body = Stmt::Block { statements: vec![body, Stmt::Expr(increment)] }
+            }
+        };
+
+        body = Stmt::While {
+            condition,
+            body: Box::new(body)
+        };
+
+        if let Some(initializer) = initializer {
+            body = Stmt::Block { statements: vec![initializer, body] }
+        };
+
+        Ok(body)
+
+    }
+
     fn block(&mut self) -> ParserResult<Vec<Stmt<'a>>> {
         self.advance();
-        let mut statements = Vec::with_capacity(32);
+        let mut statements = Vec::with_capacity(16);
         while !self.is_at_end() && self.token.kind != TokenKind::RightBrace {
             statements.push(self.declaration()?);
         }
@@ -207,7 +294,7 @@ impl<'a> Parser<'a> {
         };
         
         Ok(Stmt::If {
-            condition: Box::new(condition),
+            condition: condition,
             then_branch: Box::new(then_branch),
             else_branch: else_branch
         })
@@ -272,8 +359,8 @@ impl<'a> Parser<'a> {
     }
 
     fn ternary(&mut self) -> ParserResult<Expr<'a>> {
-        let mut expr = self.equality()?;
-
+        let mut expr = self.or()?;
+        
         while self.token.kind == TokenKind::QuestionMark {
             self.advance();
             let then_branch = self.equality()?;
@@ -284,15 +371,52 @@ impl<'a> Parser<'a> {
             self.advance();
             let else_branch = self.equality()?;
             expr = Expr::Ternary {
-                condition: Box::new(expr),
-                then_branch: Box::new(then_branch),
-                else_branch: Box::new(else_branch)
+                exprs: Box::new((expr, then_branch, else_branch)),
             }
+        }
+        
+        Ok(expr)
+    }
+    
+    fn or(&mut self) -> ParserResult<Expr<'a>> {
+        let mut expr = self.and()?;
+
+        while self.token.kind == TokenKind::Or {
+            let operator = BinaryOp {
+                line: self.token.get_line(),
+                kind: BinaryOpKind::Or
+            };
+            self.advance();
+            let right = self.and()?;
+            expr = Expr::Logical {
+                values: Box::new((expr, right)),
+                operator
+            };
         }
 
         Ok(expr)
     }
-    
+
+    fn and(&mut self) -> ParserResult<Expr<'a>> {
+        let mut expr = self.equality()?;
+
+        while self.token.kind == TokenKind::And {
+            let operator = BinaryOp {
+                line: self.token.get_line(),
+                kind: BinaryOpKind::And
+            };
+            self.advance();
+
+            let right = self.equality()?;
+            expr = Expr::Logical {
+                values: Box::new((expr, right)),
+                operator
+            };
+        }
+
+        Ok(expr)
+    }
+
     // TODO Create a helper method for parsing a left-associative series of binary operators
     fn equality(&mut self) -> ParserResult<Expr<'a>> {
         let mut expr = self.comparison()?;
@@ -301,9 +425,8 @@ impl<'a> Parser<'a> {
             let operator = self.binary_operator()?;
             let right = self.comparison()?;
             expr = Expr::Binary {
-                left: Box::new(expr),
-                operator,
-                right: Box::new(right)
+                values: Box::new((expr, right)),
+                operator
             };
         }
 
@@ -317,9 +440,8 @@ impl<'a> Parser<'a> {
             let operator = self.binary_operator()?;
             let right = self.term()?;
             expr = Expr::Binary {
-                left: Box::new(expr),
-                operator,
-                right: Box::new(right)
+                values: Box::new((expr, right)),
+                operator
             };
         }
 
@@ -333,9 +455,8 @@ impl<'a> Parser<'a> {
             let operator = self.binary_operator()?;
             let right = self.factor()?;
             expr = Expr::Binary {
-                left: Box::new(expr),
-                operator,
-                right: Box::new(right)
+                values: Box::new((expr, right)),
+                operator
             };
         }
 
@@ -349,9 +470,8 @@ impl<'a> Parser<'a> {
             let operator = self.binary_operator()?;
             let right = self.unary()?;
             expr = Expr::Binary {
-                left: Box::new(expr),
-                operator,
-                right: Box::new(right)
+                values: Box::new((expr, right)),
+                operator
             };
         }
 
