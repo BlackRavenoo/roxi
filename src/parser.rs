@@ -526,7 +526,43 @@ impl<'a> Parser<'a> {
             })
         }
 
-        self.primary()
+        self.call()
+    }
+
+    fn call(&mut self) -> ParserResult<Expr<'a>> {
+        let mut expr = self.primary()?;
+
+        while self.token.kind == TokenKind::LeftParen {
+            self.advance();
+            expr = self.finish_call(expr)?;
+        }
+
+        Ok(expr)
+    }
+
+    fn finish_call(&mut self, expr: Expr<'a>) -> ParserResult<Expr<'a>> {
+        let mut exprs = Vec::with_capacity(4);
+        exprs.push(expr);
+        if self.token.kind != TokenKind::RightParen {
+            while self.token.kind == TokenKind::Comma {
+                if exprs.len() > 255 {
+                    eprintln!("[line {}] Error: Can't have more than 255 arguments.", self.token.get_line());
+                }
+                exprs.push(self.expression()?)
+            }
+        }
+
+        if self.token.kind != TokenKind::RightParen {
+            return Err(self.unexpected_token(format!("'{}'. Expected ')'.", self.token.get_lexeme())))
+        }
+
+        let line = self.token.get_line();
+        self.advance();
+
+        Ok(Expr::Call {
+            line,
+            exprs
+        })
     }
 
     #[inline]
@@ -550,7 +586,7 @@ impl<'a> Parser<'a> {
                         kind: ErrorKind::UnmatchedParentheses
                     });
                 }
-                Ok(Expr::Grouping {expression: Box::new(expr)})
+                Ok(expr)
             }
             TokenKind::Identifier => Ok(Expr::Variable {name: self.token.get_lexeme(), line: self.token.get_line()}),
             _ => return Err(self.unexpected_token(format!("'{}'", self.token.get_lexeme())))

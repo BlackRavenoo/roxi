@@ -17,8 +17,9 @@ pub enum Expr<'a> {
         values: Box<(Expr<'a>, Expr<'a>)>,
         operator: BinaryOp
     },
-    Grouping {
-        expression: Box<Expr<'a>>,
+    Call {
+        line: usize,
+        exprs: Vec<Expr<'a>>,
     },
     Literal(Literal<'a>),
     Unary {

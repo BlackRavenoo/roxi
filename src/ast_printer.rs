@@ -25,7 +25,6 @@ impl Visitor<String> for AstPrinter {
     fn visit(expr: &Expr) -> String {
         match expr {
             Expr::Binary { values, operator } => parenthesize(operator.kind.as_str(), &[&values.0, &values.1]),
-            Expr::Grouping { expression } => parenthesize("group", &[expression]),
             Expr::Literal(value) => match value {
                 Literal::Number(num) => {
                     if num.fract() == 0.0 {
@@ -43,6 +42,7 @@ impl Visitor<String> for AstPrinter {
             Expr::Variable { .. } => todo!(),
             Expr::Assign { .. } => todo!(),
             Expr::Logical { .. } => todo!(),
+            Expr::Call { .. } => todo!(),
         }
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
 use wyhash2::WyHash;
 
 use crate::interpreter::Value;
@@ -19,11 +19,32 @@ impl Environment {
     }
 
     #[inline]
+    pub fn new_global_env() -> Self {
+        let mut env = Environment::new(None);
+        env.define(
+            "clock",
+            Some(Value::NativeFunction {
+                arity: 0,
+                fun: |_, _| {
+                    Value::Number(
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs_f64()  
+                    )
+                }
+            })
+        );
+
+        env
+    }
+
+    #[inline(always)]
     pub fn define<S: ToString>(&mut self, name: S, value: Option<Value>) {
         self.values.insert(name.to_string(), value);
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn assign(&mut self, name: &str, value: Value) -> bool {
         if self.values.contains_key(name) {
             self.values.entry(name.to_string()).or_insert(None).replace(value);
@@ -35,7 +56,7 @@ impl Environment {
         }
     }
     
-    #[inline]
+    #[inline(always)]
     pub fn get(&self, name: &str) -> Option<&Option<Value>> {
         self.values.get(name).or_else(|| {
             self.enclosing

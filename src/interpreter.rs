@@ -8,6 +8,8 @@ enum ErrorKind {
     DivisionByZero,
     UninitializedVariable,
     UndefinedVariable,
+    NotCallable,
+    WrongArity(usize),
     Break
 }
 
@@ -45,6 +47,18 @@ impl Display for InterpreterError {
                 self.line,
                 self.msg
             ),
+            ErrorKind::NotCallable => write!(
+                f,
+                "[line {}] Error: Can only call functions and classes.",
+                self.line
+            ),
+            ErrorKind::WrongArity(c) => write!(
+                f,
+                "[line {}] Error: Expected {} arguments, but got {}.",
+                self.line,
+                self.msg,
+                c
+            ),
             ErrorKind::Break => write!(
                 f,
                 "[line {}] Error: `break` executed outside a enclosing loop.",
@@ -54,14 +68,42 @@ impl Display for InterpreterError {
     }
 }
 
-type InterpreterResult<T> = Result<T, InterpreterError>;
+pub type InterpreterResult<T> = Result<T, InterpreterError>;
 
 #[derive(Clone)]
 pub enum Value {
     Number(f64),
     String(String),
     Bool(bool),
-    Nil
+    NativeFunction {
+        arity: u8,
+        fun: fn(&mut Interpreter, Vec<Value>) -> Value
+    },
+    Nil,
+}
+
+impl Value {
+    pub fn arity(&self, line: &usize) -> InterpreterResult<u8> {
+        match self {
+            Value::NativeFunction { arity,.. } => Ok(*arity),
+            _ => Err(InterpreterError {
+                msg: String::new(),
+                line: *line,
+                kind: ErrorKind::NotCallable,
+            })
+        }
+    }
+
+    pub fn call(&self, line: &usize, interpreter: &mut Interpreter, args: Vec<Value>) -> InterpreterResult<Value> {
+        match self {
+            Value::NativeFunction { fun, .. } => Ok(fun(interpreter, args)),
+            _ => Err(InterpreterError {
+                msg: String::new(),
+                line: *line,
+                kind: ErrorKind::NotCallable,
+            })
+        }
+    }
 }
 
 impl Display for Value {
@@ -71,6 +113,7 @@ impl Display for Value {
             Value::String(str) => write!(f, "{}", str),
             Value::Bool(bool) => write!(f, "{}", bool),
             Value::Nil => write!(f, "nil"),
+            Value::NativeFunction { .. } => write!(f, "native_func"),
         }
     }
 }
@@ -85,7 +128,6 @@ impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
     fn visit_expr(&mut self, expr: &Expr) -> InterpreterResult<Value> {
         match expr {
             Expr::Binary { values, operator } => self.visit_binary_expr(&values.0, operator, &values.1),
-            Expr::Grouping { expression } => self.visit_expr(expression),
             Expr::Literal(literal) => match literal {
                 Literal::Number(num) => Ok(Value::Number(*num)),
                 Literal::String(string) => Ok(Value::String(string.to_string())),
@@ -97,6 +139,7 @@ impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
             Expr::Variable { name, line } => self.visit_var_expr(name, line),
             Expr::Assign { name, value, line } => self.visit_assign_expr(name, value, line),
             Expr::Logical { values, operator } => self.visit_logical_expr(&values.0, operator, &values.1),
+            Expr::Call { line, exprs } => self.visit_call_expr(line, &exprs[0], &exprs[1..]),
         }
     }
 }
@@ -120,7 +163,7 @@ impl Interpreter {
     #[inline(always)]
     pub fn new() -> Self {
         Self {
-            environment: Environment::new(None)
+            environment: Environment::new_global_env()
         }
     }
     pub fn interpret(&mut self, stmt: &Stmt) -> InterpreterResult<()> {
@@ -162,6 +205,26 @@ impl Interpreter {
     }
 
     #[inline(always)]
+    fn visit_call_expr(&mut self, line: &usize, callee: &Expr, arguments: &[Expr]) -> InterpreterResult<Value> {
+        let callee = self.visit_expr(callee)?;
+
+        let arguments = arguments.into_iter()
+            .map(|arg| self.visit_expr(arg))
+            .collect::<InterpreterResult<Vec<_>>>()?;
+
+        let arity = callee.arity(line)?;
+        if arguments.len() != arity.into() {
+            return Err(InterpreterError {
+                msg: arity.to_string(),
+                line: *line,
+                kind: ErrorKind::WrongArity(arguments.len()),
+            })
+        }
+
+        callee.call(line, self, arguments)
+    }
+
+    #[inline(always)]
     fn visit_unary_expr(&mut self, operator: &UnaryOp, right: &Expr) -> InterpreterResult<Value> {
         let right = self.visit_expr(right)?;
         
@@ -186,6 +249,7 @@ impl Interpreter {
                 (Value::String(_), _) | (_, Value::String(_)) => Ok(Value::String(format!("{}{}", left, right))),
                 (Value::Number(_), v) => Self::invalid_operand(&v, "number or string", operator.line),
                 (Value::Bool(_), v) | (Value::Nil, v) => Self::invalid_operand(&v, "string", operator.line),
+                (v, _) => Self::invalid_operand(&v, "number or string", operator.line)
             },
             BinaryOpKind::Sub => match (left, right) {
                 (Value::Number(left), Value::Number(right)) => Ok(Value::Number(left - right)),
@@ -332,6 +396,7 @@ impl Interpreter {
             Value::Bool(bool) => *bool,
             Value::Number(num) => *num != 0.0,
             Value::Nil => false,
+            Value::NativeFunction { .. } => true,
         }
     }
 
@@ -352,6 +417,7 @@ impl Interpreter {
             Value::String(str) => format!("string: \"{}\"", str),
             Value::Bool(bool) => format!("bool: {}", bool),
             Value::Nil => String::from("nil"),
+            Value::NativeFunction { .. } => "native_func".to_owned(),
         };
         Err(
             InterpreterError {
