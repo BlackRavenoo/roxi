@@ -76,16 +76,21 @@ pub enum Value {
     String(String),
     Bool(bool),
     NativeFunction {
-        arity: u8,
+        arity: u16,
         fun: fn(&mut Interpreter, Vec<Value>) -> Value
+    },
+    Function {
+        params: Vec<String>,
+        body: Vec<Stmt>
     },
     Nil,
 }
 
 impl Value {
-    pub fn arity(&self, line: &usize) -> InterpreterResult<u8> {
+    pub fn arity(&self, line: &usize) -> InterpreterResult<u16> {
         match self {
             Value::NativeFunction { arity,.. } => Ok(*arity),
+            Value::Function { params, .. } => Ok(params.len() as u16),
             _ => Err(InterpreterError {
                 msg: String::new(),
                 line: *line,
@@ -94,9 +99,20 @@ impl Value {
         }
     }
 
-    pub fn call(&self, line: &usize, interpreter: &mut Interpreter, args: Vec<Value>) -> InterpreterResult<Value> {
+    pub fn call(self, line: &usize, interpreter: &mut Interpreter, args: Vec<Value>) -> InterpreterResult<Value> {
         match self {
             Value::NativeFunction { fun, .. } => Ok(fun(interpreter, args)),
+            Value::Function { params, body } => {
+                interpreter.create_new_env();
+
+                for (name, arg) in params.iter().zip(args.into_iter()) {
+                    interpreter.environment.define(name, Some(arg))
+                }
+
+                interpreter.execute_block(&body)?;
+
+                Ok(Value::Nil)
+            }
             _ => Err(InterpreterError {
                 msg: String::new(),
                 line: *line,
@@ -114,6 +130,7 @@ impl Display for Value {
             Value::Bool(bool) => write!(f, "{}", bool),
             Value::Nil => write!(f, "nil"),
             Value::NativeFunction { .. } => write!(f, "native_func"),
+            Value::Function { params, body } => todo!(),
         }
     }
 }
@@ -155,6 +172,7 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
             Stmt::If { condition, then_branch, else_branch } => self.visit_if_stmt(condition, then_branch, else_branch),
             Stmt::While { condition, body } => self.visit_while_stmt(condition, body),
             Stmt::Break { line } => self.visit_break_stmt(line),
+            Stmt::Function { name, params, body } => self.visit_function_stmt(name, params, body),
         }
     }
 }
@@ -296,8 +314,6 @@ impl Interpreter {
                 (v, _) => Self::invalid_operand(&v, "number", operator.line)
             },
             _ => unreachable!()
-            // BinaryOpKind::And => Ok(Value::Bool(Self::is_truthy(&left) && Self::is_truthy(&right))),
-            // BinaryOpKind::Or => Ok(Value::Bool(Self::is_truthy(&left) || Self::is_truthy(&right))),
         }
     }
 
@@ -355,6 +371,8 @@ impl Interpreter {
     
     #[inline(always)]
     fn visit_block_stmt(&mut self, statements: &[Stmt]) -> InterpreterResult<()> {
+        self.create_new_env();
+
         self.execute_block(statements)
     }
 
@@ -387,7 +405,19 @@ impl Interpreter {
             line: *line,
             kind: ErrorKind::Break,
         })
-    } 
+    }
+
+    fn visit_function_stmt(&mut self, name: &str, params: &[String], body: &[Stmt]) -> InterpreterResult<()> {
+        self.environment.define(
+            name,
+            Some(Value::Function {
+                params: params.to_vec(),
+                body: body.to_vec()
+            })
+        );
+
+        Ok(())
+    }
 
     #[inline(always)]
     fn is_truthy(value: &Value) -> bool {
@@ -397,6 +427,7 @@ impl Interpreter {
             Value::Number(num) => *num != 0.0,
             Value::Nil => false,
             Value::NativeFunction { .. } => true,
+            Value::Function { .. } => true,
         }
     }
 
@@ -418,6 +449,7 @@ impl Interpreter {
             Value::Bool(bool) => format!("bool: {}", bool),
             Value::Nil => String::from("nil"),
             Value::NativeFunction { .. } => "native_func".to_owned(),
+            Value::Function { params, body } => "func".to_owned(),
         };
         Err(
             InterpreterError {
@@ -430,17 +462,6 @@ impl Interpreter {
 
     #[inline(always)]
     fn execute_block(&mut self, statements: &[Stmt]) -> InterpreterResult<()> {
-        // SAFETY: We read from `self.environment` and write env into it.
-        // Old env is not duplicated, nothing is dropped
-        unsafe {
-            let enclosing = ptr::read(&self.environment);
-            let env = Environment::new(Some(Box::new(enclosing)));
-            ptr::write(&mut self.environment, env)
-        }
-
-        // let old_env = std::mem::replace(&mut self.environment, Environment::new(None));
-        // self.environment.enclosing = Some(Box::new(old_env));
-
         for stmt in statements {
             self.visit_stmt(stmt)?;
         }
@@ -448,5 +469,16 @@ impl Interpreter {
         self.environment =  std::mem::take(&mut self.environment.enclosing).map(|e| *e).unwrap();
 
         Ok(())
+    }
+
+    #[inline(always)]
+    fn create_new_env(&mut self) {
+        // SAFETY: We read from `self.environment` and write env into it.
+        // Old env is not duplicated, nothing is dropped
+        unsafe {
+            let enclosing = ptr::read(&self.environment);
+            let env = Environment::new(Some(Box::new(enclosing)));
+            ptr::write(&mut self.environment, env)
+        }
     }
 }

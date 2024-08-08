@@ -5,24 +5,29 @@ pub trait StmtVisitor<T> {
 }
 
 #[derive(Clone, Debug)]
-pub enum Stmt<'a> {
-    Expr(Expr<'a>),
-    Print(Expr<'a>),
+pub enum Stmt {
+    Expr(Expr),
+    Print(Expr),
     Var {
-        name: &'a str,
-        initializer: Option<Expr<'a>>
+        name: String,
+        initializer: Option<Expr>
     },
     Block {
-        statements: Vec<Stmt<'a>>
+        statements: Vec<Stmt>
+    },
+    Function {
+        name: String,
+        params: Vec<String>,
+        body: Vec<Stmt>
     },
     If {
-        condition: Expr<'a>,
-        then_branch: Box<Stmt<'a>>,
-        else_branch: Option<Box<Stmt<'a>>>
+        condition: Expr,
+        then_branch: Box<Stmt>,
+        else_branch: Option<Box<Stmt>>
     },
     While {
-        condition: Expr<'a>,
-        body: Box<Stmt<'a>>
+        condition: Expr,
+        body: Box<Stmt>
     },
     Break {
         line: usize 

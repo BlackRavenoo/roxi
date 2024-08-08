@@ -131,14 +131,10 @@ fn repl() {
         let mut parser = Parser::new(&input);
         match parser.parse() {
             Ok(stmt) => {
-                match interpreter.interpret(&stmt) {
-                    Ok(_) => (),
-                    Err(_) => (),
-                }
+                let _ = interpreter.interpret(&stmt);
             },
             Err(_) => (),
         }
-        input.clear()
     }
 }
 

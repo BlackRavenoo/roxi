@@ -7,34 +7,34 @@ pub trait ExprVisitor<T> {
 }
 
 #[derive(Clone, Debug)]
-pub enum Expr<'a> {
+pub enum Expr {
     Assign {
-        name: &'a str,
+        name: String,
         line: usize,
-        value: Box<Expr<'a>>
+        value: Box<Expr>
     },
     Binary {
-        values: Box<(Expr<'a>, Expr<'a>)>,
+        values: Box<(Expr, Expr)>,
         operator: BinaryOp
     },
     Call {
         line: usize,
-        exprs: Vec<Expr<'a>>,
+        exprs: Vec<Expr>,
     },
-    Literal(Literal<'a>),
+    Literal(Literal),
     Unary {
         operator: UnaryOp,
-        right: Box<Expr<'a>>,
+        right: Box<Expr>,
     },
     Ternary {
-        exprs: Box<(Expr<'a>, Expr<'a>, Expr<'a>)>,
+        exprs: Box<(Expr, Expr, Expr)>,
     },
     Variable {
-        name: &'a str,
+        name: String,
         line: usize
     },
     Logical {
-        values: Box<(Expr<'a>, Expr<'a>)>,
+        values: Box<(Expr, Expr)>,
         operator: BinaryOp
     }
 }
@@ -102,9 +102,9 @@ impl UnaryOpKind {
 }
 
 #[derive(Clone, Debug)]
-pub enum Literal<'a> {
+pub enum Literal {
     Number(f64),
-    String(&'a str),
+    String(String),
     Bool(bool),
     Nil
 }

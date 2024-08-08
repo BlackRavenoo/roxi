@@ -112,18 +112,17 @@ impl<'a> Parser<'a> {
     }
 
     #[inline(always)]
-    pub fn parse(&mut self) -> ParserResult<Stmt<'a>> {
+    pub fn parse(&mut self) -> ParserResult<Stmt> {
         self.declaration()
     }
 
-    fn declaration(&mut self) -> ParserResult<Stmt<'a>> {
+    fn declaration(&mut self) -> ParserResult<Stmt> {
         let result = match self.token.kind {
             TokenKind::Var => self.var_declaration(),
             _ => self.statement()
         };
         if let Err(ref e) = result {
             match self.token.kind {
-                TokenKind::EOF => eprintln!("Error: Unexpected EOF"),
                 TokenKind::Error(_) => report(&self.token),
                 _ => eprintln!("{}", e),
             }
@@ -133,11 +132,11 @@ impl<'a> Parser<'a> {
         result
     }
 
-    fn var_declaration(&mut self) -> ParserResult<Stmt<'a>> {
+    fn var_declaration(&mut self) -> ParserResult<Stmt> {
         self.advance();
 
         let name = if let TokenKind::Identifier = self.token.kind {
-            self.token.get_lexeme()
+            self.token.get_lexeme().to_owned()
         } else {
             return Err(self.unexpected_token(format!("'{}'. Expected variable name.", self.token.get_lexeme())));
         };
@@ -159,12 +158,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn statement(&mut self) -> ParserResult<Stmt<'a>> {
+    fn statement(&mut self) -> ParserResult<Stmt> {
         match self.token.kind {
             TokenKind::Print => self.print_statement(),
             TokenKind::While => self.while_statement(),
             TokenKind::For => self.for_statement(),
             TokenKind::Break => self.break_statement(),
+            TokenKind::Fun => self.fun_statement(),
             TokenKind::LeftBrace => {
                 let mut block = self.block()?;
                 if block.len() == 1 { // Optimization
@@ -178,7 +178,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn print_statement(&mut self) -> ParserResult<Stmt<'a>> {
+    fn print_statement(&mut self) -> ParserResult<Stmt> {
         self.advance();
         let statement = Stmt::Print(self.expression()?);
         if self.token.kind != TokenKind::Semicolon {
@@ -189,7 +189,7 @@ impl<'a> Parser<'a> {
         Ok(statement)
     }
 
-    fn while_statement(&mut self) -> ParserResult<Stmt<'a>> {
+    fn while_statement(&mut self) -> ParserResult<Stmt> {
         self.advance();
         if self.token.kind != TokenKind::LeftParen {
             return Err(self.unexpected_token(format!("'{}'. Expected '('.", self.token.get_lexeme())))
@@ -213,7 +213,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn for_statement(&mut self) -> ParserResult<Stmt<'a>> {
+    fn for_statement(&mut self) -> ParserResult<Stmt> {
         self.advance();
         if self.token.kind != TokenKind::LeftParen {
             return Err(self.unexpected_token(format!("'{}'. Expected '('.", self.token.get_lexeme())))
@@ -274,7 +274,7 @@ impl<'a> Parser<'a> {
 
     }
 
-    fn break_statement(&mut self) -> ParserResult<Stmt<'a>> {
+    fn break_statement(&mut self) -> ParserResult<Stmt> {
         let line = self.token.get_line();
         
         self.advance();
@@ -296,12 +296,62 @@ impl<'a> Parser<'a> {
 
     }
 
-    fn block(&mut self) -> ParserResult<Vec<Stmt<'a>>> {
+    fn fun_statement(&mut self) -> ParserResult<Stmt> {
         self.advance();
-        let mut statements = Vec::with_capacity(16);
-        while !self.is_at_end() && self.token.kind != TokenKind::RightBrace {
-            statements.push(self.declaration()?);
+        if self.token.kind != TokenKind::Identifier {
+            return Err(self.unexpected_token(format!("'{}'. Expected function name.", self.token.get_lexeme())))
         }
+        let name = self.token.get_lexeme().to_owned();
+        self.advance();
+        if self.token.kind != TokenKind::LeftParen {
+            return Err(self.unexpected_token(format!("'{}'. Expected '('.", self.token.get_lexeme())))
+        }
+        self.advance();
+
+        let params = if self.token.kind != TokenKind::RightParen {
+            let mut params = Vec::with_capacity(4);
+            params.push(self.token.get_lexeme().to_owned());
+            self.advance();
+            while !self.is_at_end() && self.token.kind == TokenKind::Comma {
+                if params.len() > 255 {
+                    eprintln!("[line {}] Error: Can't have more than 255 arguments.", self.token.get_line());
+                }
+                self.advance();
+                params.push(self.token.get_lexeme().to_owned());
+                self.advance();
+            } 
+            params
+        } else {
+            Vec::new()
+        };
+
+        if self.token.kind != TokenKind::RightParen {
+            return Err(self.unexpected_token(format!("'{}'. Expected ')'.", self.token.get_lexeme())))
+        }
+        self.advance();
+        if self.token.kind != TokenKind::LeftBrace {
+            return Err(self.unexpected_token(format!("'{}'. Expected '{{'.", self.token.get_lexeme())))
+        }
+        let body = self.block()?;
+
+        Ok(Stmt::Function {
+            name,
+            params,
+            body
+        })
+    }
+
+    fn block(&mut self) -> ParserResult<Vec<Stmt>> {
+        self.advance();
+        let statements = if self.token.kind == TokenKind::RightBrace {
+            Vec::new()
+        } else {
+            let mut statements =  Vec::with_capacity(8);
+            while !self.is_at_end() && self.token.kind != TokenKind::RightBrace {
+                statements.push(self.declaration()?);
+            }
+            statements
+        };
 
         if self.token.kind != TokenKind::RightBrace {
             Err(self.unexpected_token(format!("'{}'. Expected '}}' after block.", self.token.get_lexeme())))
@@ -311,7 +361,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn if_statement(&mut self) -> ParserResult<Stmt<'a>> {
+    fn if_statement(&mut self) -> ParserResult<Stmt> {
         self.advance();
         if self.token.kind != TokenKind::LeftParen {
             return Err(self.unexpected_token(format!("'{}'. Expected '('.", self.token.get_lexeme())))
@@ -332,13 +382,13 @@ impl<'a> Parser<'a> {
         };
         
         Ok(Stmt::If {
-            condition: condition,
+            condition,
             then_branch: Box::new(then_branch),
-            else_branch: else_branch
+            else_branch
         })
     }
 
-    fn expr_statement(&mut self) -> ParserResult<Stmt<'a>> {
+    fn expr_statement(&mut self) -> ParserResult<Stmt> {
         let statement = Stmt::Expr(self.expression()?);
         if self.token.kind != TokenKind::Semicolon {
             return Err(self.unexpected_token(format!("'{}'. Expected ';'.", self.token.get_lexeme())))
@@ -349,7 +399,7 @@ impl<'a> Parser<'a> {
     }
 
     #[inline(always)]
-    pub fn expression(&mut self) -> ParserResult<Expr<'a>> {
+    pub fn expression(&mut self) -> ParserResult<Expr> {
         if matches!(
             self.token.kind,
             TokenKind::Plus
@@ -375,7 +425,7 @@ impl<'a> Parser<'a> {
         self.assignment()
     }
 
-    fn assignment(&mut self) -> ParserResult<Expr<'a>> {
+    fn assignment(&mut self) -> ParserResult<Expr> {
         let mut expr = self.ternary()?;
 
         if self.token.kind == TokenKind::Equal {
@@ -396,7 +446,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn ternary(&mut self) -> ParserResult<Expr<'a>> {
+    fn ternary(&mut self) -> ParserResult<Expr> {
         let mut expr = self.or()?;
         
         while self.token.kind == TokenKind::QuestionMark {
@@ -416,7 +466,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
     
-    fn or(&mut self) -> ParserResult<Expr<'a>> {
+    fn or(&mut self) -> ParserResult<Expr> {
         let mut expr = self.and()?;
 
         while self.token.kind == TokenKind::Or {
@@ -435,7 +485,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn and(&mut self) -> ParserResult<Expr<'a>> {
+    fn and(&mut self) -> ParserResult<Expr> {
         let mut expr = self.equality()?;
 
         while self.token.kind == TokenKind::And {
@@ -456,7 +506,7 @@ impl<'a> Parser<'a> {
     }
 
     // TODO Create a helper method for parsing a left-associative series of binary operators
-    fn equality(&mut self) -> ParserResult<Expr<'a>> {
+    fn equality(&mut self) -> ParserResult<Expr> {
         let mut expr = self.comparison()?;
 
         while matches!(self.token.kind, TokenKind::EqualEqual | TokenKind::BangEqual) {
@@ -471,7 +521,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn comparison(&mut self) -> ParserResult<Expr<'a>> {
+    fn comparison(&mut self) -> ParserResult<Expr> {
         let mut expr = self.term()?;
 
         while matches!(self.token.kind, TokenKind::Greater | TokenKind::GreaterEqual | TokenKind::Less | TokenKind::LessEqual) {
@@ -486,7 +536,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn term(&mut self) -> ParserResult<Expr<'a>> {
+    fn term(&mut self) -> ParserResult<Expr> {
         let mut expr = self.factor()?;
 
         while matches!(self.token.kind, TokenKind::Minus | TokenKind::Plus) {
@@ -501,7 +551,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn factor(&mut self) -> ParserResult<Expr<'a>> {
+    fn factor(&mut self) -> ParserResult<Expr> {
         let mut expr = self.unary()?;
 
         while matches!(self.token.kind, TokenKind::Slash | TokenKind::Star) {
@@ -516,7 +566,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn unary(&mut self) -> ParserResult<Expr<'a>> {
+    fn unary(&mut self) -> ParserResult<Expr> {
         if matches!(self.token.kind, TokenKind::Minus | TokenKind::Bang) {
             let operator = self.unary_operator()?;
             let right = self.unary()?;
@@ -529,10 +579,10 @@ impl<'a> Parser<'a> {
         self.call()
     }
 
-    fn call(&mut self) -> ParserResult<Expr<'a>> {
+    fn call(&mut self) -> ParserResult<Expr> {
         let mut expr = self.primary()?;
 
-        while self.token.kind == TokenKind::LeftParen {
+        if self.token.kind == TokenKind::LeftParen {
             self.advance();
             expr = self.finish_call(expr)?;
         }
@@ -540,17 +590,22 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn finish_call(&mut self, expr: Expr<'a>) -> ParserResult<Expr<'a>> {
-        let mut exprs = Vec::with_capacity(4);
-        exprs.push(expr);
-        if self.token.kind != TokenKind::RightParen {
+    fn finish_call(&mut self, expr: Expr) -> ParserResult<Expr> {
+        let exprs = if self.token.kind != TokenKind::RightParen {
+            let mut exprs = Vec::with_capacity(4);
+            exprs.push(expr);
+            exprs.push(self.expression()?);
             while self.token.kind == TokenKind::Comma {
+                self.advance();
                 if exprs.len() > 255 {
                     eprintln!("[line {}] Error: Can't have more than 255 arguments.", self.token.get_line());
                 }
                 exprs.push(self.expression()?)
             }
-        }
+            exprs
+        } else {
+            vec![expr]
+        };
 
         if self.token.kind != TokenKind::RightParen {
             return Err(self.unexpected_token(format!("'{}'. Expected ')'.", self.token.get_lexeme())))
@@ -566,7 +621,7 @@ impl<'a> Parser<'a> {
     }
 
     #[inline]
-    fn primary(&mut self) -> ParserResult<Expr<'a>> {
+    fn primary(&mut self) -> ParserResult<Expr> {
         let expr = match self.token.kind {
             TokenKind::False => Ok(Expr::Literal(Literal::Bool(false))), 
             TokenKind::True => Ok(Expr::Literal(Literal::Bool(true))),
@@ -574,7 +629,7 @@ impl<'a> Parser<'a> {
             TokenKind::Number => Ok(Expr::Literal(Literal::Number(self.token.get_lexeme().parse().unwrap()))),
             TokenKind::String => {
                 let lexeme = self.token.get_lexeme();
-                Ok(Expr::Literal(Literal::String(&lexeme[1..lexeme.len() - 1])))
+                Ok(Expr::Literal(Literal::String(lexeme[1..lexeme.len() - 1].to_owned())))
             },
             TokenKind::LeftParen => {
                 self.advance();
@@ -588,7 +643,7 @@ impl<'a> Parser<'a> {
                 }
                 Ok(expr)
             }
-            TokenKind::Identifier => Ok(Expr::Variable {name: self.token.get_lexeme(), line: self.token.get_line()}),
+            TokenKind::Identifier => Ok(Expr::Variable {name: self.token.get_lexeme().to_owned(), line: self.token.get_line()}),
             _ => return Err(self.unexpected_token(format!("'{}'", self.token.get_lexeme())))
         };
         self.advance();

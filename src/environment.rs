@@ -30,7 +30,7 @@ impl Environment {
                         SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .unwrap()
-                            .as_secs_f64()  
+                            .as_secs_f64()
                     )
                 }
             })
