@@ -165,6 +165,7 @@ impl<'a> Parser<'a> {
             TokenKind::For => self.for_statement(),
             TokenKind::Break => self.break_statement(),
             TokenKind::Fun => self.fun_statement(),
+            TokenKind::Return => self.return_statement(),
             TokenKind::LeftBrace => {
                 let mut block = self.block()?;
                 if block.len() == 1 { // Optimization
@@ -338,6 +339,27 @@ impl<'a> Parser<'a> {
             name,
             params,
             body
+        })
+    }
+
+    fn return_statement(&mut self) -> ParserResult<Stmt> {
+        let line = self.token.get_line();
+        self.advance();
+
+        let value = if self.token.kind == TokenKind::Semicolon {
+            Expr::Literal(Literal::Nil)
+        } else {
+            self.expression()?
+        };
+
+        if self.token.kind != TokenKind::Semicolon {
+            return Err(self.unexpected_token(format!("'{}'. Expected ';'.", self.token.get_lexeme())))
+        }
+        self.advance();
+
+        Ok(Stmt::Return {
+            line,
+            value
         })
     }
 

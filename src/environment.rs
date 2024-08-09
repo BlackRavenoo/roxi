@@ -3,6 +3,7 @@ use wyhash2::WyHash;
 
 use crate::interpreter::Value;
 
+#[derive(Debug)]
 pub struct Environment {
     pub enclosing: Option<Box<Environment>>,
     values: HashMap<String, Option<Value>, WyHash>

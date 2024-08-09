@@ -10,6 +10,7 @@ enum ErrorKind {
     UndefinedVariable,
     NotCallable,
     WrongArity(usize),
+    Return(Value),
     Break
 }
 
@@ -64,13 +65,18 @@ impl Display for InterpreterError {
                 "[line {}] Error: `break` executed outside a enclosing loop.",
                 self.line
             ),
+            ErrorKind::Return(_) => write!(
+                f,
+                "[line {}] Error: `return` outside function.",
+                self.line
+            ),
         }
     }
 }
 
 pub type InterpreterResult<T> = Result<T, InterpreterError>;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Value {
     Number(f64),
     String(String),
@@ -109,9 +115,13 @@ impl Value {
                     interpreter.environment.define(name, Some(arg))
                 }
 
-                interpreter.execute_block(&body)?;
-
-                Ok(Value::Nil)
+                match interpreter.execute_block(&body) {
+                    Ok(_) => Ok(Value::Nil),
+                    Err(e) => match e.kind {
+                        ErrorKind::Return(value) => Ok(value),
+                        _ => Err(e)
+                    }
+                }
             }
             _ => Err(InterpreterError {
                 msg: String::new(),
@@ -130,7 +140,7 @@ impl Display for Value {
             Value::Bool(bool) => write!(f, "{}", bool),
             Value::Nil => write!(f, "nil"),
             Value::NativeFunction { .. } => write!(f, "native_func"),
-            Value::Function { params, body } => todo!(),
+            Value::Function { .. } => write!(f, "func"),
         }
     }
 }
@@ -173,6 +183,7 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
             Stmt::While { condition, body } => self.visit_while_stmt(condition, body),
             Stmt::Break { line } => self.visit_break_stmt(line),
             Stmt::Function { name, params, body } => self.visit_function_stmt(name, params, body),
+            Stmt::Return { line, value } => self.visit_return_stmt(line, value),
         }
     }
 }
@@ -419,6 +430,20 @@ impl Interpreter {
         Ok(())
     }
 
+    fn visit_return_stmt(&mut self, line: &usize, value: &Expr) -> InterpreterResult<()> {
+        Err(InterpreterError{
+            msg: String::new(),
+            line: *line,
+            kind: ErrorKind::Return(
+                if value != &Expr::Literal(Literal::Nil) {
+                    self.visit_expr(value)?
+                } else {
+                    Value::Nil
+                }
+            ),
+        })
+    }
+
     #[inline(always)]
     fn is_truthy(value: &Value) -> bool {
         match value {
@@ -449,7 +474,7 @@ impl Interpreter {
             Value::Bool(bool) => format!("bool: {}", bool),
             Value::Nil => String::from("nil"),
             Value::NativeFunction { .. } => "native_func".to_owned(),
-            Value::Function { params, body } => "func".to_owned(),
+            Value::Function { .. } => "func".to_owned(),
         };
         Err(
             InterpreterError {
@@ -463,10 +488,17 @@ impl Interpreter {
     #[inline(always)]
     fn execute_block(&mut self, statements: &[Stmt]) -> InterpreterResult<()> {
         for stmt in statements {
-            self.visit_stmt(stmt)?;
+            let result = self.visit_stmt(stmt);
+            match result {
+                Ok(_) => (),
+                Err(_) => {
+                    self.environment = std::mem::take(&mut self.environment.enclosing).map(|e| *e).unwrap();
+                    return result;
+                },
+            }
         }
 
-        self.environment =  std::mem::take(&mut self.environment.enclosing).map(|e| *e).unwrap();
+        self.environment = std::mem::take(&mut self.environment.enclosing).map(|e| *e).unwrap();
 
         Ok(())
     }

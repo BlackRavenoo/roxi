@@ -6,7 +6,7 @@ pub trait ExprVisitor<T> {
     fn visit_expr(&mut self, expr: &Expr) -> T;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
     Assign {
         name: String,
@@ -39,13 +39,13 @@ pub enum Expr {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BinaryOp {
     pub line: usize,
     pub kind: BinaryOpKind
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UnaryOp {
     pub line: usize,
     pub kind: UnaryOpKind
@@ -86,7 +86,7 @@ impl BinaryOpKind {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum UnaryOpKind {
     Neg,
     Not
@@ -101,7 +101,7 @@ impl UnaryOpKind {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Literal {
     Number(f64),
     String(String),

@@ -69,8 +69,8 @@ fn main() {
             );
 
             while !parser.is_at_end() {
-                match parser.expression() {
-                    Ok(expr) => AstPrinter::print(&expr),
+                match parser.parse() {
+                    Ok(stmt) => AstPrinter::print(&stmt),
                     Err(e) => {
                         eprintln!("{}", e);
                         exit_code = 65;
@@ -93,8 +93,8 @@ fn main() {
 
             while !parser.is_at_end() {
                 match parser.parse() {
-                    Ok(expr) => {
-                        match interpreter.interpret(&expr) {
+                    Ok(stmt) => {
+                        match interpreter.interpret(&stmt) {
                             Ok(_) => (),
                             Err(_) => exit_code = 70,
                         }

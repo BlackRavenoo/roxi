@@ -8,6 +8,10 @@ pub trait StmtVisitor<T> {
 pub enum Stmt {
     Expr(Expr),
     Print(Expr),
+    Return {
+        line: usize,
+        value: Expr
+    },
     Var {
         name: String,
         initializer: Option<Expr>
