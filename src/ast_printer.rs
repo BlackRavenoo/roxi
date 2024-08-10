@@ -12,9 +12,9 @@ impl AstPrinter {
             Stmt::Var { name, .. } => println!("var {} = ", name),
             Stmt::Block { statements } => {println!("block "); let _ = statements.iter().for_each(|stmt| AstPrinter::print(stmt));},
             Stmt::Function { name, body, .. } => {println!("func {} ", name); let _ = body.iter().for_each(|stmt| AstPrinter::print(stmt));},
-            Stmt::If { condition, then_branch, else_branch } => println!("if {}", AstPrinter::visit(condition)),
+            Stmt::If { condition, .. } => println!("if {}", AstPrinter::visit(condition)),
             Stmt::While { body, .. } => {println!("while "); AstPrinter::print(&body);},
-            Stmt::Break { line } => todo!(),
+            Stmt::Break { .. } => todo!(),
         }
     }
 }

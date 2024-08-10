@@ -1,4 +1,4 @@
-use std::{fmt::Display, ptr};
+use std::{cell::RefCell, fmt::Display, rc::Rc};
 
 use crate::{environment::Environment, expr::{BinaryOp, BinaryOpKind, Expr, ExprVisitor, Literal, UnaryOp, UnaryOpKind}, stmt::{Stmt, StmtVisitor}};
 
@@ -87,7 +87,8 @@ pub enum Value {
     },
     Function {
         params: Vec<String>,
-        body: Vec<Stmt>
+        body: Vec<Stmt>,
+        closure: Rc<RefCell<Environment>>
     },
     Nil,
 }
@@ -108,20 +109,25 @@ impl Value {
     pub fn call(self, line: &usize, interpreter: &mut Interpreter, args: Vec<Value>) -> InterpreterResult<Value> {
         match self {
             Value::NativeFunction { fun, .. } => Ok(fun(interpreter, args)),
-            Value::Function { params, body } => {
-                interpreter.create_new_env();
+            Value::Function { params, body, closure } => {
+                let env = interpreter.environment.clone();
+                interpreter.environment = Rc::new(RefCell::new(Environment::new(Some(closure))));
 
                 for (name, arg) in params.iter().zip(args.into_iter()) {
-                    interpreter.environment.define(name, Some(arg))
+                    interpreter.environment.borrow_mut().define(name, Some(arg))
                 }
 
-                match interpreter.execute_block(&body) {
+                let res = match interpreter.execute_block(&body) {
                     Ok(_) => Ok(Value::Nil),
                     Err(e) => match e.kind {
                         ErrorKind::Return(value) => Ok(value),
                         _ => Err(e)
                     }
-                }
+                };
+
+                interpreter.environment = env;
+
+                res
             }
             _ => Err(InterpreterError {
                 msg: String::new(),
@@ -147,7 +153,7 @@ impl Display for Value {
 
 
 pub struct Interpreter {
-    environment: Environment
+    environment: Rc<RefCell<Environment>>
 }
 
 impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
@@ -192,7 +198,7 @@ impl Interpreter {
     #[inline(always)]
     pub fn new() -> Self {
         Self {
-            environment: Environment::new_global_env()
+            environment: Rc::new(RefCell::new(Environment::new_global_env()))
         }
     }
     pub fn interpret(&mut self, stmt: &Stmt) -> InterpreterResult<()> {
@@ -207,7 +213,7 @@ impl Interpreter {
     #[inline(always)]
     fn visit_assign_expr(&mut self, name: &str, expr: &Expr, line: &usize) -> InterpreterResult<Value> {
         let value = self.visit_expr(expr)?;
-        if self.environment.assign(name, value.clone()) {
+        if self.environment.borrow_mut().assign(name, value.clone()) {
             Ok(value)
         } else {
             Err(InterpreterError{
@@ -339,7 +345,7 @@ impl Interpreter {
 
     #[inline(always)]
     fn visit_var_expr(&mut self, name: &str, line: &usize) -> InterpreterResult<Value> {
-        match self.environment.get(name) {
+        match self.environment.borrow().get(name) {
             Some(Some(value)) => Ok(value.clone()),
             Some(None) => Err(InterpreterError{
                 msg: name.to_owned(),
@@ -375,7 +381,7 @@ impl Interpreter {
             None
         };
         
-        self.environment.define(name, value);
+        self.environment.borrow_mut().define(name, value);
         
         Ok(())
     }
@@ -419,11 +425,12 @@ impl Interpreter {
     }
 
     fn visit_function_stmt(&mut self, name: &str, params: &[String], body: &[Stmt]) -> InterpreterResult<()> {
-        self.environment.define(
+        self.environment.borrow_mut().define(
             name,
             Some(Value::Function {
                 params: params.to_vec(),
-                body: body.to_vec()
+                body: body.to_vec(),
+                closure: self.environment.clone()
             })
         );
 
@@ -489,28 +496,28 @@ impl Interpreter {
     fn execute_block(&mut self, statements: &[Stmt]) -> InterpreterResult<()> {
         for stmt in statements {
             let result = self.visit_stmt(stmt);
-            match result {
-                Ok(_) => (),
-                Err(_) => {
-                    self.environment = std::mem::take(&mut self.environment.enclosing).map(|e| *e).unwrap();
-                    return result;
-                },
+            if result.is_err() {
+                let mut env = self.environment.borrow_mut();
+                if let Some(enclosing) = env.enclosing.take() {
+                    drop(env);
+                    self.environment = enclosing;
+                }
+                return result;
             }
         }
 
-        self.environment = std::mem::take(&mut self.environment.enclosing).map(|e| *e).unwrap();
+        let mut env = self.environment.borrow_mut();
+        if let Some(enclosing) = env.enclosing.take() {
+            drop(env);
+            self.environment = enclosing;
+        }
 
         Ok(())
     }
 
     #[inline(always)]
     fn create_new_env(&mut self) {
-        // SAFETY: We read from `self.environment` and write env into it.
-        // Old env is not duplicated, nothing is dropped
-        unsafe {
-            let enclosing = ptr::read(&self.environment);
-            let env = Environment::new(Some(Box::new(enclosing)));
-            ptr::write(&mut self.environment, env)
-        }
+        let enclosing = self.environment.clone();
+        self.environment = Rc::new(RefCell::new(Environment::new(Some(enclosing))));
     }
 }

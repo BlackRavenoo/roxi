@@ -1,18 +1,18 @@
-use std::{collections::HashMap, time::{SystemTime, UNIX_EPOCH}};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, time::{SystemTime, UNIX_EPOCH}};
 use wyhash2::WyHash;
 
 use crate::interpreter::Value;
 
 #[derive(Debug)]
 pub struct Environment {
-    pub enclosing: Option<Box<Environment>>,
+    pub enclosing: Option<Rc<RefCell<Environment>>>,
     values: HashMap<String, Option<Value>, WyHash>
 }
 
 
 impl Environment {
     #[inline(always)]
-    pub fn new(enclosing: Option<Box<Environment>>) -> Self {
+    pub fn new(enclosing: Option<Rc<RefCell<Environment>>>) -> Self {
         Self {
             enclosing,
             values: HashMap::with_hasher(WyHash::with_seed(594)),
@@ -53,16 +53,25 @@ impl Environment {
         } else {
             self.enclosing
                 .as_mut()
-                .map_or(false, |env| env.assign(name, value))
+                .map_or(false, |env| env.borrow_mut().assign(name, value))
         }
     }
     
     #[inline(always)]
-    pub fn get(&self, name: &str) -> Option<&Option<Value>> {
-        self.values.get(name).or_else(|| {
-            self.enclosing
-                .as_ref()
-                .and_then(|enclosing| enclosing.get(name))
-        })
+    pub fn get(&self, name: &str) -> Option<Option<Value>> {
+        // self.values.get(name).or_else(|| {
+        //     self.enclosing
+        //         .as_ref()
+        //         .and_then(|enclosing| enclosing.as_ref().borrow().get(name))
+        // })
+        if let Some(value) = self.values.get(name) {
+            return Some(value.clone());
+        }
+
+        if let Some(enclosing) = &self.enclosing {
+            return enclosing.borrow().get(name);
+        }
+
+        None
     }
 }
