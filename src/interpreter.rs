@@ -406,12 +406,31 @@ impl Interpreter {
 
     #[inline(always)]
     fn visit_while_stmt(&mut self, condition: &Expr, body: &Stmt) -> InterpreterResult<()> {
-        while Self::is_truthy(&self.visit_expr(condition)?) {
-            match self.visit_stmt(body) {
-                Err(InterpreterError { kind: ErrorKind::Break, .. }) => return Ok(()),
-                res => res?,
-            };
+        match body {
+            Stmt::Block { statements } => {
+                self.create_new_env();
+
+                while Self::is_truthy(&self.visit_expr(condition)?) {
+                    for stmt in statements {
+                        let result = self.visit_stmt(stmt);
+                        if result.is_err() {
+                            self.remove_new_env();
+                            return result;
+                        }
+                    }
+                    
+                    self.environment.borrow_mut().clear()
+                }
+                
+                self.remove_new_env();
+            },
+            _ => {
+                while Self::is_truthy(&self.visit_expr(condition)?) {
+                    self.visit_stmt(body)?
+                }
+            }
         }
+
         Ok(())
     }
 
@@ -497,20 +516,12 @@ impl Interpreter {
         for stmt in statements {
             let result = self.visit_stmt(stmt);
             if result.is_err() {
-                let mut env = self.environment.borrow_mut();
-                if let Some(enclosing) = env.enclosing.take() {
-                    drop(env);
-                    self.environment = enclosing;
-                }
+                self.remove_new_env();
                 return result;
             }
         }
 
-        let mut env = self.environment.borrow_mut();
-        if let Some(enclosing) = env.enclosing.take() {
-            drop(env);
-            self.environment = enclosing;
-        }
+        self.remove_new_env();
 
         Ok(())
     }
@@ -519,5 +530,14 @@ impl Interpreter {
     fn create_new_env(&mut self) {
         let enclosing = self.environment.clone();
         self.environment = Rc::new(RefCell::new(Environment::new(Some(enclosing))));
+    }
+
+    #[inline(always)]
+    fn remove_new_env(&mut self) {
+        let mut env = self.environment.borrow_mut();
+        if let Some(enclosing) = env.enclosing.take() {
+            drop(env);
+            self.environment = enclosing;
+        }
     }
 }

@@ -59,11 +59,6 @@ impl Environment {
     
     #[inline(always)]
     pub fn get(&self, name: &str) -> Option<Option<Value>> {
-        // self.values.get(name).or_else(|| {
-        //     self.enclosing
-        //         .as_ref()
-        //         .and_then(|enclosing| enclosing.as_ref().borrow().get(name))
-        // })
         if let Some(value) = self.values.get(name) {
             return Some(value.clone());
         }
@@ -73,5 +68,10 @@ impl Environment {
         }
 
         None
+    }
+
+    #[inline(always)]
+    pub fn clear(&mut self) {
+        self.values.clear()
     }
 }
