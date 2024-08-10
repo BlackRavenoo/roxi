@@ -1,3 +1,5 @@
+use crate::stmt::Stmt;
+
 pub trait Visitor<T> {
     fn visit(expr: &Expr) -> T;
 }
@@ -36,6 +38,10 @@ pub enum Expr {
     Logical {
         values: Box<(Expr, Expr)>,
         operator: BinaryOp
+    },
+    Lambda {
+        params: Vec<String>,
+        body: Vec<Stmt>
     }
 }
 

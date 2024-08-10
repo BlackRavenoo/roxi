@@ -146,7 +146,7 @@ impl Display for Value {
             Value::Bool(bool) => write!(f, "{}", bool),
             Value::Nil => write!(f, "nil"),
             Value::NativeFunction { .. } => write!(f, "native_func"),
-            Value::Function { .. } => write!(f, "func"),
+            Value::Function { params, body, ..  } => write!(f, "func({:?}) {{\n{:?}\n}}", params, body),
         }
     }
 }
@@ -173,6 +173,7 @@ impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
             Expr::Assign { name, value, line } => self.visit_assign_expr(name, value, line),
             Expr::Logical { values, operator } => self.visit_logical_expr(&values.0, operator, &values.1),
             Expr::Call { line, exprs } => self.visit_call_expr(line, &exprs[0], &exprs[1..]),
+            Expr::Lambda { params, body } => self.visit_lambda_expr(params, body),
         }
     }
 }
@@ -257,6 +258,15 @@ impl Interpreter {
         }
 
         callee.call(line, self, arguments)
+    }
+
+    #[inline(always)]
+    fn visit_lambda_expr(&mut self, params: &[String], body: &[Stmt]) -> InterpreterResult<Value> {
+        Ok(Value::Function {
+            params: params.to_vec(),
+            body: body.to_vec(),
+            closure: self.environment.clone()
+        })
     }
 
     #[inline(always)]

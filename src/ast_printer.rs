@@ -53,6 +53,7 @@ impl Visitor<String> for AstPrinter {
             Expr::Assign { .. } => "".to_owned(),
             Expr::Logical { .. } => todo!(),
             Expr::Call { exprs, .. } => parenthesize("call ", &exprs.iter().collect::<Vec<_>>()),
+            Expr::Lambda { .. } => todo!(),
         }
     }
 }

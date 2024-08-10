@@ -448,6 +448,9 @@ impl<'a> Parser<'a> {
     }
 
     fn assignment(&mut self) -> ParserResult<Expr> {
+        if self.token.kind == TokenKind::Fun {
+            return Ok(self.lambda()?)
+        }
         let mut expr = self.ternary()?;
 
         if self.token.kind == TokenKind::Equal {
@@ -612,6 +615,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
+    #[inline(always)]
     fn finish_call(&mut self, expr: Expr) -> ParserResult<Expr> {
         let exprs = if self.token.kind != TokenKind::RightParen {
             let mut exprs = Vec::with_capacity(4);
@@ -639,6 +643,48 @@ impl<'a> Parser<'a> {
         Ok(Expr::Call {
             line,
             exprs
+        })
+    }
+
+    #[inline(always)]
+    fn lambda(&mut self) -> ParserResult<Expr> {
+        self.advance();
+        if self.token.kind != TokenKind::LeftParen {
+            return Err(self.unexpected_token(format!("'{}'. Expected '('.", self.token.get_lexeme())));
+        }
+        self.advance();
+        
+        let params = if self.token.kind == TokenKind::RightParen {
+            Vec::new()
+        } else {
+            let mut params = Vec::with_capacity(4);
+            if self.token.kind != TokenKind::Identifier {
+                return Err(self.unexpected_token(format!("'{}'. Expected identifier.", self.token.get_lexeme())));
+            }
+            params.push(self.token.get_lexeme().to_owned());
+            self.advance();
+            while self.token.kind == TokenKind::Comma {
+                self.advance();
+                if self.token.kind != TokenKind::Identifier {
+                    return Err(self.unexpected_token(format!("'{}'. Expected identifier.", self.token.get_lexeme())));
+                }
+                params.push(self.token.get_lexeme().to_owned());
+                self.advance();
+            }
+            params
+        };
+
+        if self.token.kind != TokenKind::RightParen {
+            return Err(self.unexpected_token(format!("'{}'. Expected ')'.", self.token.get_lexeme())));
+        }
+        self.advance();
+        if self.token.kind != TokenKind::LeftBrace {
+            return Err(self.unexpected_token(format!("'{}'. Expected '{{'.", self.token.get_lexeme())));
+        }
+
+        Ok(Expr::Lambda {
+            params,
+            body: self.block()?
         })
     }
 
