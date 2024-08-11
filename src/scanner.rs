@@ -30,7 +30,7 @@ pub struct Scanner<'a> {
 }
 
 impl<'a> Scanner<'a> {
-    #[inline]
+    #[inline(always)]
     pub fn new(source: &'a str) -> Self {
         Self {
             source,

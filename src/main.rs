@@ -9,6 +9,7 @@ mod parser;
 mod interpreter;
 mod stmt;
 mod environment;
+mod resolver;
 
 use ast_printer::AstPrinter;
 use interpreter::Interpreter;
