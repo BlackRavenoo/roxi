@@ -37,9 +37,9 @@ impl StmtVisitor<ResolverResult<()>> for Resolver<'_> {
     #[inline(always)]
     fn visit_stmt(&mut self, stmt: &Stmt) -> ResolverResult<()> {
         match stmt {
-            Stmt::Expr(expr) => self.visit_expr_stmt(expr),
-            Stmt::Print(expr) => self.visit_expr_stmt(expr),
-            Stmt::Return { value, .. } => self.visit_expr_stmt(value),
+            Stmt::Expr(expr) => self.visit_expr(expr),
+            Stmt::Print(expr) => self.visit_expr(expr),
+            Stmt::Return { value, .. } => self.visit_expr(value),
             Stmt::Var { name, initializer } => self.visit_var_stmt(name, initializer),
             Stmt::Block { statements } => self.visit_block_stmt(statements),
             Stmt::Function { name, params, body } => self.visit_function_stmt(name, params, body),
@@ -54,13 +54,13 @@ impl ExprVisitor<ResolverResult<()>> for Resolver<'_> {
     #[inline(always)]
     fn visit_expr(&mut self, expr: &Expr) -> ResolverResult<()> {
         match expr {
-            Expr::Assign { name, value, .. } => self.visit_assign_expr(name, value),
+            Expr::Assign { name, value, offset, .. } => self.visit_assign_expr(name, value, offset),
             Expr::Binary { values, .. } => self.visit_binary_expr(&values.0, &values.1),
             Expr::Call { exprs, .. } => self.visit_call_expr(&exprs[0], &exprs[1..]),
             Expr::Literal(_) => Ok(()),
             Expr::Unary { right, .. } => self.visit_expr(right),
             Expr::Ternary { exprs } => self.visit_ternary_expr(&exprs.0, &exprs.1, &exprs.2),
-            Expr::Variable { name, line } => self.visit_variable_expr(name, line),
+            Expr::Variable { name, line, offset } => self.visit_variable_expr(name, line, offset),
             Expr::Logical { values, .. } => self.visit_logical_expr(&values.0, &values.1),
             Expr::Lambda { params, body } => self.resolve_function(params, body),
         }
@@ -72,11 +72,11 @@ impl Resolver<'_> {
     pub fn new(interpreter: &mut Interpreter) -> Resolver {
         Resolver {
             interpreter,
-            scopes: Vec::new(),
+            scopes: Vec::with_capacity(2),
         }
     }
 
-    fn resolve_stmts(&mut self, stmts: &[Stmt]) -> ResolverResult<()> {
+    pub fn resolve_stmts(&mut self, stmts: &[Stmt]) -> ResolverResult<()> {
         for stmt in stmts.iter() {
             self.visit_stmt(stmt)?
         };
@@ -84,13 +84,13 @@ impl Resolver<'_> {
         Ok(())
     }
 
-    fn resolve_local(&mut self, name: &str) {
-        self.scopes.iter().rev().enumerate().for_each(|(i, scope)| {
+    fn resolve_local(&mut self, name: &str, offset: usize) {
+        for (i, scope) in self.scopes.iter().enumerate().rev() {
             if scope.contains_key(name) {
-                self.interpreter.resolve(name, self.scopes.len() - 1 - i);
+                self.interpreter.resolve(offset, self.scopes.len() - 1 - i);
                 return;
             }
-        })
+        }
     }
     
     fn begin_scope(&mut self) {
@@ -112,26 +112,23 @@ impl Resolver<'_> {
             scope.insert(name.to_string(), true);
         }
     }
-
-    #[inline(always)]
-    fn visit_expr_stmt(&mut self, expr: &Expr) -> ResolverResult<()> {
-        self.visit_expr(expr)
-    }
     
     #[inline(always)]
     fn visit_var_stmt(&mut self, name: &str, initializer: &Option<Expr>) -> ResolverResult<()>  {
         self.declare(name);
-        if let Some(initializer) = initializer {
-            self.visit_expr(initializer);
-        }
+        let res = if let Some(initializer) = initializer {
+            self.visit_expr(initializer)
+        } else {
+            Ok(())
+        };
         self.define(name);
-        Ok(())
+        res
     }
 
     #[inline(always)]
     fn visit_block_stmt(&mut self, statements: &[Stmt]) -> ResolverResult<()> {
         self.begin_scope();
-        self.resolve_stmts(statements);
+        self.resolve_stmts(statements)?;
         self.end_scope();
         Ok(())
     }
@@ -140,9 +137,7 @@ impl Resolver<'_> {
     fn visit_function_stmt(&mut self, name: &str, params: &[String], body: &[Stmt]) -> ResolverResult<()> {
         self.declare(name);
         self.define(name);
-        self.resolve_function(params, body);
-
-        Ok(())
+        self.resolve_function(params, body)
     }
 
     #[inline(always)]
@@ -163,9 +158,9 @@ impl Resolver<'_> {
     }
 
     #[inline(always)]
-    fn visit_assign_expr(&mut self, name: &str, value: &Expr) -> ResolverResult<()> {
-        self.visit_expr(value);
-        self.resolve_local(name);
+    fn visit_assign_expr(&mut self, name: &str, value: &Expr, offset: &usize) -> ResolverResult<()> {
+        self.visit_expr(value)?;
+        self.resolve_local(name, *offset);
         Ok(())
     }
 
@@ -194,14 +189,14 @@ impl Resolver<'_> {
     }
 
     #[inline(always)]
-    fn visit_variable_expr(&mut self, name: &str, line: &usize) -> ResolverResult<()> {
+    fn visit_variable_expr(&mut self, name: &str, line: &usize, offset: &usize) -> ResolverResult<()> {
         if let Some(scope) = self.scopes.last() {
             if scope.get(name) == Some(&false) {
                 return Err(ResolverError::SelfRefInitializer { name: name.to_owned(), line: *line })
             }
         }
 
-        self.resolve_local(name);
+        self.resolve_local(name, *offset);
 
         Ok(())
     }
@@ -219,7 +214,7 @@ impl Resolver<'_> {
             self.declare(param);
             self.define(param);
         }
-        self.resolve_stmts(body);
+        self.resolve_stmts(body)?;
         self.end_scope();
         Ok(())
     }

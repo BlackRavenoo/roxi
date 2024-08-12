@@ -13,7 +13,8 @@ pub enum Expr {
     Assign {
         name: String,
         line: usize,
-        value: Box<Expr>
+        value: Box<Expr>,
+        offset: usize
     },
     Binary {
         values: Box<(Expr, Expr)>,
@@ -33,7 +34,8 @@ pub enum Expr {
     },
     Variable {
         name: String,
-        line: usize
+        line: usize,
+        offset: usize,
     },
     Logical {
         values: Box<(Expr, Expr)>,

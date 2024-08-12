@@ -455,8 +455,8 @@ impl<'a> Parser<'a> {
 
         if self.token.kind == TokenKind::Equal {
             self.advance();
-            if let Expr::Variable { name, line } = expr {
-                expr = Expr::Assign { name, value: Box::new(self.assignment()?), line }
+            if let Expr::Variable { name, line, offset } = expr {
+                expr = Expr::Assign { name, value: Box::new(self.assignment()?), line, offset }
             } else {
                 return Err(
                     ParserError {
@@ -711,7 +711,7 @@ impl<'a> Parser<'a> {
                 }
                 Ok(expr)
             }
-            TokenKind::Identifier => Ok(Expr::Variable {name: self.token.get_lexeme().to_owned(), line: self.token.get_line()}),
+            TokenKind::Identifier => Ok(Expr::Variable {name: self.token.get_lexeme().to_owned(), line: self.token.get_line(), offset: self.token.get_offset()}),
             _ => return Err(self.unexpected_token(format!("'{}'", self.token.get_lexeme())))
         };
         self.advance();

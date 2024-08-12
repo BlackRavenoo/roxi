@@ -119,7 +119,8 @@ impl<'a> Scanner<'a> {
         Token::new(
             kind,
             self.lexeme(),
-            self.line
+            self.line,
+            self.start
         )
     }
 
@@ -186,7 +187,7 @@ impl<'a> Scanner<'a> {
             return self.make_token(TokenKind::String)
         }
 
-        Token::new(TokenKind::Error("Unterminated string."), "", self.line)
+        Token::new(TokenKind::Error("Unterminated string."), "", self.line, self.start)
     }
 
     #[inline(always)]
@@ -243,15 +244,17 @@ pub struct Token<'a> {
     pub kind: TokenKind,
     lexeme: &'a str,
     line: usize,
+    offset: usize,
 }
 
 impl<'a> Token<'a> {
     #[inline(always)]
-    fn new(kind: TokenKind, lexeme: &'a str, line: usize) -> Self {
+    fn new(kind: TokenKind, lexeme: &'a str, line: usize, offset: usize) -> Self {
         Self {
             kind,
             lexeme,
             line,
+            offset
         }
     }
     
@@ -263,6 +266,11 @@ impl<'a> Token<'a> {
     #[inline(always)]
     pub fn get_line(&self) -> usize {
         self.line
+    }
+
+    #[inline(always)]
+    pub fn get_offset(&self) -> usize {
+        self.offset
     }
 }
 

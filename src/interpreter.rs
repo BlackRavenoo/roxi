@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fmt::Display, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc};
 
 use crate::{environment::Environment, expr::{BinaryOp, BinaryOpKind, Expr, ExprVisitor, Literal, UnaryOp, UnaryOpKind}, stmt::{Stmt, StmtVisitor}};
 
@@ -110,8 +110,8 @@ impl Value {
         match self {
             Value::NativeFunction { fun, .. } => Ok(fun(interpreter, args)),
             Value::Function { params, body, closure } => {
-                let env = interpreter.environment.clone();
-                interpreter.environment = Rc::new(RefCell::new(Environment::new(Some(closure))));
+                let mut env = Rc::new(RefCell::new(Environment::new(Some(closure.clone()))));
+                std::mem::swap(&mut interpreter.environment, &mut env);
 
                 for (name, arg) in params.iter().zip(args.into_iter()) {
                     interpreter.environment.borrow_mut().define(name, Some(arg))
@@ -153,7 +153,9 @@ impl Display for Value {
 
 
 pub struct Interpreter {
-    environment: Rc<RefCell<Environment>>
+    environment: Rc<RefCell<Environment>>,
+    globals: Rc<RefCell<Environment>>,
+    locals: HashMap<usize, usize>
 }
 
 impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
@@ -169,8 +171,8 @@ impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
             },
             Expr::Unary { operator, right } => self.visit_unary_expr(operator, right),
             Expr::Ternary { exprs } => self.visit_ternary_expr(&exprs.0, &exprs.1, &exprs.2),
-            Expr::Variable { name, line } => self.visit_var_expr(name, line),
-            Expr::Assign { name, value, line } => self.visit_assign_expr(name, value, line),
+            Expr::Variable { name, line, offset  } => self.visit_var_expr(name, line, offset),
+            Expr::Assign { name, value, line, offset  } => self.visit_assign_expr(name, value, line, offset),
             Expr::Logical { values, operator } => self.visit_logical_expr(&values.0, operator, &values.1),
             Expr::Call { line, exprs } => self.visit_call_expr(line, &exprs[0], &exprs[1..]),
             Expr::Lambda { params, body } => self.visit_lambda_expr(params, body),
@@ -198,10 +200,14 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
 impl Interpreter {
     #[inline(always)]
     pub fn new() -> Self {
+        let globals = Rc::new(RefCell::new(Environment::new_global_env()));
         Self {
-            environment: Rc::new(RefCell::new(Environment::new_global_env()))
+            environment: globals.clone(),
+            globals,
+            locals: Default::default()
         }
     }
+    
     pub fn interpret(&mut self, stmt: &Stmt) -> InterpreterResult<()> {
         let result = self.visit_stmt(stmt);
         if let Err(ref e) = result {
@@ -212,16 +218,25 @@ impl Interpreter {
     }
 
     #[inline(always)]
-    fn visit_assign_expr(&mut self, name: &str, expr: &Expr, line: &usize) -> InterpreterResult<Value> {
+    fn visit_assign_expr(&mut self, name: &str, expr: &Expr, line: &usize, offset: &usize) -> InterpreterResult<Value> {
         let value = self.visit_expr(expr)?;
-        if self.environment.borrow_mut().assign(name, value.clone()) {
-            Ok(value)
-        } else {
-            Err(InterpreterError{
+
+        let status = match self.locals.get(offset) {
+            Some(dist) => {
+                self.environment.borrow_mut().assign_at(name, value.clone(), *dist)
+            },
+            None => {
+                self.globals.borrow_mut().assign(name, value.clone())
+            },
+        };
+
+        match status {
+            true => Ok(value),
+            false => Err(InterpreterError{
                 msg: name.to_owned(),
                 line: *line,
                 kind: ErrorKind::UndefinedVariable,
-            })
+            }),
         }
     }
 
@@ -354,9 +369,14 @@ impl Interpreter {
     }
 
     #[inline(always)]
-    fn visit_var_expr(&mut self, name: &str, line: &usize) -> InterpreterResult<Value> {
-        match self.environment.borrow().get(name) {
-            Some(Some(value)) => Ok(value.clone()),
+    fn visit_var_expr(&mut self, name: &str, line: &usize, offset: &usize) -> InterpreterResult<Value> {
+        let value = match self.locals.get(offset) {
+            Some(dist) => self.environment.borrow().get_at(name, *dist),
+            None => self.globals.borrow().get(name),
+        };
+
+        match value {
+            Some(Some(value)) => Ok(value),
             Some(None) => Err(InterpreterError{
                 msg: name.to_owned(),
                 line: *line,
@@ -372,7 +392,7 @@ impl Interpreter {
 
     #[inline(always)]
     fn visit_expr_stmt(&mut self, expr: &Expr) -> InterpreterResult<()> {
-        let _ = self.visit_expr(expr)?;
+        self.visit_expr(expr)?;
         Ok(())
     }
 
@@ -400,7 +420,11 @@ impl Interpreter {
     fn visit_block_stmt(&mut self, statements: &[Stmt]) -> InterpreterResult<()> {
         self.create_new_env();
 
-        self.execute_block(statements)
+        let res = self.execute_block(statements);
+
+        self.remove_new_env();
+
+        res
     }
 
     #[inline(always)]
@@ -524,14 +548,8 @@ impl Interpreter {
     #[inline(always)]
     fn execute_block(&mut self, statements: &[Stmt]) -> InterpreterResult<()> {
         for stmt in statements {
-            let result = self.visit_stmt(stmt);
-            if result.is_err() {
-                self.remove_new_env();
-                return result;
-            }
+            self.visit_stmt(stmt)?;
         }
-
-        self.remove_new_env();
 
         Ok(())
     }
@@ -549,5 +567,10 @@ impl Interpreter {
             drop(env);
             self.environment = enclosing;
         }
+    }
+
+    #[inline(always)]
+    pub fn resolve(&mut self, offset: usize, depth: usize) {
+        self.locals.insert(offset, depth);
     }
 }

@@ -19,7 +19,7 @@ impl Environment {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn new_global_env() -> Self {
         let mut env = Environment::new(None);
         env.define(
@@ -51,23 +51,47 @@ impl Environment {
             self.values.entry(name.to_string()).or_insert(None).replace(value);
             true
         } else {
-            self.enclosing
-                .as_mut()
-                .map_or(false, |env| env.borrow_mut().assign(name, value))
+            false
+        }
+    }
+
+    #[inline(always)]
+    pub fn assign_at(&mut self, name: &str, value: Value, dist: usize) -> bool {
+        if dist == 0 {
+            self.assign(name, value)
+        } else {
+            self.ancestor(dist).borrow_mut().assign(name, value)
         }
     }
     
     #[inline(always)]
     pub fn get(&self, name: &str) -> Option<Option<Value>> {
         if let Some(value) = self.values.get(name) {
-            return Some(value.clone());
+            Some(value.clone())
+        } else {
+            None
         }
 
-        if let Some(enclosing) = &self.enclosing {
-            return enclosing.borrow().get(name);
-        }
+    }
 
-        None
+    #[inline(always)]
+    pub fn get_at(&self, name: &str, dist: usize) -> Option<Option<Value>> {
+        if dist == 0 {
+            self.values.get(name).cloned()
+        } else {
+            self.ancestor(dist).borrow().values.get(name).cloned()
+        }
+    }
+
+    #[inline(always)]
+    pub fn ancestor(&self, dist: usize) -> Rc<RefCell<Environment>> {
+        let mut current = self.enclosing.clone();
+        
+        for _ in 1..dist {
+            current = current.unwrap().borrow().enclosing.clone();
+        }
+        
+        current.unwrap()
     }
 
     #[inline(always)]

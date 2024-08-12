@@ -14,6 +14,7 @@ mod resolver;
 use ast_printer::AstPrinter;
 use interpreter::Interpreter;
 use parser::Parser;
+use resolver::Resolver;
 use scanner::Scanner;
 use scanner::Token;
 use scanner::TokenKind;
@@ -90,19 +91,31 @@ fn main() {
                 &file_contents
             );
 
-            let mut interpreter = Interpreter::new();
-
+            let mut stmts = Vec::with_capacity(32);
             while !parser.is_at_end() {
                 match parser.parse() {
-                    Ok(stmt) => {
-                        match interpreter.interpret(&stmt) {
-                            Ok(_) => (),
-                            Err(_) => exit_code = 70,
-                        }
-                    },
-                    Err(_) => {
-                        exit_code = 65;
-                    },
+                    Ok(stmt) => stmts.push(stmt),
+                    Err(_) => exit_code = 65,
+                }
+            }
+
+            if exit_code != 0 {
+                std::process::exit(exit_code)
+            }
+
+            let mut interpreter = Interpreter::new();
+            {
+                let mut resolver = Resolver::new(&mut interpreter);
+                match resolver.resolve_stmts(&stmts) {
+                    Ok(_) => (),
+                    Err(e) => eprintln!("{}", e),
+                };
+            }
+
+            for stmt in stmts {
+                match interpreter.interpret(&stmt) {
+                    Ok(_) => (),
+                    Err(_) => std::process::exit(70),
                 }
             }
         }
