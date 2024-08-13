@@ -38,7 +38,7 @@ impl Display for ResolverError {
                 f,
                 "[line {}] `return` outside function.",
                 line
-            ),
+            )
         }
     }
 }
@@ -51,9 +51,16 @@ enum FunctionKind {
     Function
 }
 
+#[derive(PartialEq)]
+enum VariableState {
+    Declared,
+    Defined,
+    Used
+}
+
 pub struct Resolver<'a> {
     interpreter: &'a mut Interpreter,
-    scopes: Vec<HashMap<String, bool, WyHash>>,
+    scopes: Vec<HashMap<String, VariableState, WyHash>>,
     current_function: FunctionKind
 }
 
@@ -110,8 +117,9 @@ impl Resolver<'_> {
     }
 
     fn resolve_local(&mut self, name: &str, offset: usize) {
-        for (i, scope) in self.scopes.iter().enumerate().rev() {
-            if scope.contains_key(name) {
+        for (i, scope) in self.scopes.iter_mut().enumerate().rev() {
+            if let Some(var) = scope.get_mut(name) {
+                *var = VariableState::Used;
                 self.interpreter.resolve(offset, self.scopes.len() - 1 - i);
                 return;
             }
@@ -123,7 +131,13 @@ impl Resolver<'_> {
     }
     
     fn end_scope(&mut self) {
-        self.scopes.pop();
+        if let Some(scope) = self.scopes.pop() {
+            for (name, state) in scope {
+                if state != VariableState::Used {
+                    eprintln!("Warning: Unused local variable `{}`.", name)
+                }
+            }
+        }
     }
 
     fn declare(&mut self, name: &str, line: usize) -> ResolverResult<()> {
@@ -131,14 +145,14 @@ impl Resolver<'_> {
             if scope.contains_key(name) {
                 return Err(ResolverError::ReDeclaration { name: name.to_string(), line })
             }
-            scope.insert(name.to_string(), false);
+            scope.insert(name.to_string(), VariableState::Declared);
         }
         Ok(())
     }
 
     fn define(&mut self, name: &str) {
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), true);
+            scope.insert(name.to_string(), VariableState::Defined);
         }
     }
 
@@ -228,7 +242,7 @@ impl Resolver<'_> {
     #[inline(always)]
     fn visit_variable_expr(&mut self, name: &str, line: &usize, offset: &usize) -> ResolverResult<()> {
         if let Some(scope) = self.scopes.last() {
-            if scope.get(name) == Some(&false) {
+            if scope.get(name) == Some(&VariableState::Declared) {
                 return Err(ResolverError::SelfRefInitializer { name: name.to_owned(), line: *line })
             }
         }
