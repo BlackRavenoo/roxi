@@ -14,7 +14,8 @@ pub enum Stmt {
     },
     Var {
         name: String,
-        initializer: Option<Expr>
+        initializer: Option<Expr>,
+        line: usize
     },
     Block {
         statements: Vec<Stmt>
@@ -22,7 +23,8 @@ pub enum Stmt {
     Function {
         name: String,
         params: Vec<String>,
-        body: Vec<Stmt>
+        body: Vec<Stmt>,
+        line: usize
     },
     If {
         condition: Expr,

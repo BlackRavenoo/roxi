@@ -141,6 +141,8 @@ impl<'a> Parser<'a> {
             return Err(self.unexpected_token(format!("'{}'. Expected variable name.", self.token.get_lexeme())));
         };
 
+        let line = self.token.get_line();
+
         self.advance();
         
         let initializer = if self.token.kind == TokenKind::Equal {
@@ -152,7 +154,7 @@ impl<'a> Parser<'a> {
 
         if self.token.kind == TokenKind::Semicolon {
             self.advance();
-            Ok(Stmt::Var {name, initializer})
+            Ok(Stmt::Var {name, initializer, line})
         } else {
             Err(self.unexpected_token(format!("'{}'. Expected ';'.", self.token.get_lexeme())))
         }
@@ -303,6 +305,7 @@ impl<'a> Parser<'a> {
             return Err(self.unexpected_token(format!("'{}'. Expected function name.", self.token.get_lexeme())))
         }
         let name = self.token.get_lexeme().to_owned();
+        let line = self.token.get_line();
         self.advance();
         if self.token.kind != TokenKind::LeftParen {
             return Err(self.unexpected_token(format!("'{}'. Expected '('.", self.token.get_lexeme())))
@@ -338,7 +341,8 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Function {
             name,
             params,
-            body
+            body,
+            line,
         })
     }
 

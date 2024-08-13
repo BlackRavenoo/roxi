@@ -186,12 +186,12 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
         match stmt {
             Stmt::Expr(expr) => self.visit_expr_stmt(expr),
             Stmt::Print(expr) => self.visit_print_stmt(expr),
-            Stmt::Var { name, initializer } => self.visit_var_stmt(name, initializer),
+            Stmt::Var { name, initializer, .. } => self.visit_var_stmt(name, initializer),
             Stmt::Block { statements } => self.visit_block_stmt(statements),
             Stmt::If { condition, then_branch, else_branch } => self.visit_if_stmt(condition, then_branch, else_branch),
             Stmt::While { condition, body } => self.visit_while_stmt(condition, body),
             Stmt::Break { line } => self.visit_break_stmt(line),
-            Stmt::Function { name, params, body } => self.visit_function_stmt(name, params, body),
+            Stmt::Function { name, params, body, .. } => self.visit_function_stmt(name, params, body),
             Stmt::Return { line, value } => self.visit_return_stmt(line, value),
         }
     }

@@ -108,7 +108,10 @@ fn main() {
                 let mut resolver = Resolver::new(&mut interpreter);
                 match resolver.resolve_stmts(&stmts) {
                     Ok(_) => (),
-                    Err(e) => eprintln!("{}", e),
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        std::process::exit(65)
+                    },
                 };
             }
 

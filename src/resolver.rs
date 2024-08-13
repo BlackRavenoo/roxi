@@ -9,8 +9,14 @@ pub enum ResolverError {
     SelfRefInitializer {
         name: String,
         line: usize
+    },
+    ReDeclaration {
+        name: String,
+        line: usize
+    },
+    ReturnOutsideFunction {
+        line: usize
     }
-    
 }
 
 impl Display for ResolverError {
@@ -22,15 +28,33 @@ impl Display for ResolverError {
                 line,
                 name
             ),
+            ResolverError::ReDeclaration { name, line } => write!(
+                f,
+                "[line {}] Variable `{}` already exists in this scope.",
+                line,
+                name
+            ),
+            ResolverError::ReturnOutsideFunction { line } => write!(
+                f,
+                "[line {}] `return` outside function.",
+                line
+            ),
         }
     }
 }
 
 pub type ResolverResult<T> = Result<T, ResolverError>;
 
+#[derive(PartialEq)]
+enum FunctionKind {
+    None,
+    Function
+}
+
 pub struct Resolver<'a> {
     interpreter: &'a mut Interpreter,
-    scopes: Vec<HashMap<String, bool, WyHash>>
+    scopes: Vec<HashMap<String, bool, WyHash>>,
+    current_function: FunctionKind
 }
 
 impl StmtVisitor<ResolverResult<()>> for Resolver<'_> {
@@ -39,10 +63,10 @@ impl StmtVisitor<ResolverResult<()>> for Resolver<'_> {
         match stmt {
             Stmt::Expr(expr) => self.visit_expr(expr),
             Stmt::Print(expr) => self.visit_expr(expr),
-            Stmt::Return { value, .. } => self.visit_expr(value),
-            Stmt::Var { name, initializer } => self.visit_var_stmt(name, initializer),
+            Stmt::Return { value, line } => self.visit_return_stmt(value, line),
+            Stmt::Var { name, initializer, line } => self.visit_var_stmt(name, initializer, line),
             Stmt::Block { statements } => self.visit_block_stmt(statements),
-            Stmt::Function { name, params, body } => self.visit_function_stmt(name, params, body),
+            Stmt::Function { name, params, body, line } => self.visit_function_stmt(name, params, body, *line),
             Stmt::If { condition, then_branch, else_branch } => self.visit_if_stmt(condition, then_branch, else_branch),
             Stmt::While { condition, body } => self.visit_while_stmt(condition, body),
             Stmt::Break { .. } => Ok(()),
@@ -62,7 +86,7 @@ impl ExprVisitor<ResolverResult<()>> for Resolver<'_> {
             Expr::Ternary { exprs } => self.visit_ternary_expr(&exprs.0, &exprs.1, &exprs.2),
             Expr::Variable { name, line, offset } => self.visit_variable_expr(name, line, offset),
             Expr::Logical { values, .. } => self.visit_logical_expr(&values.0, &values.1),
-            Expr::Lambda { params, body } => self.resolve_function(params, body),
+            Expr::Lambda { params, body } => self.resolve_function(params, body, 0, FunctionKind::Function),
         }
     }
 }
@@ -73,6 +97,7 @@ impl Resolver<'_> {
         Resolver {
             interpreter,
             scopes: Vec::with_capacity(2),
+            current_function: FunctionKind::None
         }
     }
 
@@ -101,10 +126,14 @@ impl Resolver<'_> {
         self.scopes.pop();
     }
 
-    fn declare(&mut self, name: &str) {
+    fn declare(&mut self, name: &str, line: usize) -> ResolverResult<()> {
         if let Some(scope) = self.scopes.last_mut() {
+            if scope.contains_key(name) {
+                return Err(ResolverError::ReDeclaration { name: name.to_string(), line })
+            }
             scope.insert(name.to_string(), false);
         }
+        Ok(())
     }
 
     fn define(&mut self, name: &str) {
@@ -112,10 +141,18 @@ impl Resolver<'_> {
             scope.insert(name.to_string(), true);
         }
     }
+
+    #[inline(always)]
+    fn visit_return_stmt(&mut self, expr: &Expr, line: &usize) -> ResolverResult<()> {
+        if self.current_function == FunctionKind::None {
+            return Err(ResolverError::ReturnOutsideFunction { line: *line })
+        }
+        self.visit_expr(expr)
+    }
     
     #[inline(always)]
-    fn visit_var_stmt(&mut self, name: &str, initializer: &Option<Expr>) -> ResolverResult<()>  {
-        self.declare(name);
+    fn visit_var_stmt(&mut self, name: &str, initializer: &Option<Expr>, line: &usize) -> ResolverResult<()>  {
+        self.declare(name, *line)?;
         let res = if let Some(initializer) = initializer {
             self.visit_expr(initializer)
         } else {
@@ -134,10 +171,10 @@ impl Resolver<'_> {
     }
 
     #[inline(always)]
-    fn visit_function_stmt(&mut self, name: &str, params: &[String], body: &[Stmt]) -> ResolverResult<()> {
-        self.declare(name);
+    fn visit_function_stmt(&mut self, name: &str, params: &[String], body: &[Stmt], line: usize) -> ResolverResult<()> {
+        self.declare(name, line)?;
         self.define(name);
-        self.resolve_function(params, body)
+        self.resolve_function(params, body, line, FunctionKind::Function)
     }
 
     #[inline(always)]
@@ -208,14 +245,22 @@ impl Resolver<'_> {
     }
 
     #[inline(always)]
-    fn resolve_function(&mut self, params: &[String], body: &[Stmt]) -> ResolverResult<()> {
+    fn resolve_function(
+        &mut self,
+        params: &[String],
+        body: &[Stmt],
+        line: usize,
+        kind: FunctionKind
+    ) -> ResolverResult<()> {
+        let enclosing_function = std::mem::replace(&mut self.current_function, kind);
         self.begin_scope();
         for param in params {
-            self.declare(param);
+            self.declare(param, line)?;
             self.define(param);
         }
         self.resolve_stmts(body)?;
         self.end_scope();
+        self.current_function = enclosing_function;
         Ok(())
     }
 }
