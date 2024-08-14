@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc};
 
-use crate::{environment::Environment, expr::{BinaryOp, BinaryOpKind, Expr, ExprVisitor, Literal, UnaryOp, UnaryOpKind}, stmt::{Stmt, StmtVisitor}};
+use crate::{environment::{GlobalEnvironment, LocalEnvironment}, expr::{BinaryOp, BinaryOpKind, Expr, ExprVisitor, Literal, UnaryOp, UnaryOpKind}, resolver::Binding, stmt::{Stmt, StmtVisitor}};
 
 #[derive(Debug)]
 enum ErrorKind {
@@ -86,9 +86,9 @@ pub enum Value {
         fun: fn(&mut Interpreter, Vec<Value>) -> Value
     },
     Function {
-        params: Vec<String>,
+        params: Vec<(String, usize)>,
         body: Vec<Stmt>,
-        closure: Rc<RefCell<Environment>>
+        closure: Option<Rc<RefCell<LocalEnvironment>>>
     },
     Nil,
 }
@@ -110,11 +110,18 @@ impl Value {
         match self {
             Value::NativeFunction { fun, .. } => Ok(fun(interpreter, args)),
             Value::Function { params, body, closure } => {
-                let mut env = Rc::new(RefCell::new(Environment::new(Some(closure.clone()))));
+                let mut env = Some(Rc::new(RefCell::new(LocalEnvironment::new(closure.clone()))));
                 std::mem::swap(&mut interpreter.environment, &mut env);
 
-                for (name, arg) in params.iter().zip(args.into_iter()) {
-                    interpreter.environment.borrow_mut().define(name, Some(arg))
+                for ((_, offset), arg) in params.iter().zip(args.into_iter()) {
+                    interpreter.environment
+                        .as_mut()
+                        .unwrap()
+                        .borrow_mut()
+                        .assign_at(
+                            &interpreter.locals[offset],
+                            Some(arg)
+                        )
                 }
 
                 let res = match interpreter.execute_block(&body) {
@@ -153,9 +160,9 @@ impl Display for Value {
 
 
 pub struct Interpreter {
-    environment: Rc<RefCell<Environment>>,
-    globals: Rc<RefCell<Environment>>,
-    locals: HashMap<usize, usize>
+    environment: Option<Rc<RefCell<LocalEnvironment>>>,
+    globals: GlobalEnvironment,
+    pub locals: HashMap<usize, Binding>
 }
 
 impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
@@ -186,12 +193,12 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
         match stmt {
             Stmt::Expr(expr) => self.visit_expr_stmt(expr),
             Stmt::Print(expr) => self.visit_print_stmt(expr),
-            Stmt::Var { name, initializer, .. } => self.visit_var_stmt(name, initializer),
+            Stmt::Var { name, initializer, offset, .. } => self.visit_var_stmt(name, initializer, *offset),
             Stmt::Block { statements } => self.visit_block_stmt(statements),
             Stmt::If { condition, then_branch, else_branch } => self.visit_if_stmt(condition, then_branch, else_branch),
             Stmt::While { condition, body } => self.visit_while_stmt(condition, body),
             Stmt::Break { line } => self.visit_break_stmt(line),
-            Stmt::Function { name, params, body, .. } => self.visit_function_stmt(name, params, body),
+            Stmt::Function { name, params, body, offset, .. } => self.visit_function_stmt(name, params, body, *offset),
             Stmt::Return { line, value } => self.visit_return_stmt(line, value),
         }
     }
@@ -200,10 +207,9 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
 impl Interpreter {
     #[inline(always)]
     pub fn new() -> Self {
-        let globals = Rc::new(RefCell::new(Environment::new_global_env()));
         Self {
-            environment: globals.clone(),
-            globals,
+            environment: None,
+            globals: GlobalEnvironment::new_global_env(),
             locals: Default::default()
         }
     }
@@ -222,11 +228,12 @@ impl Interpreter {
         let value = self.visit_expr(expr)?;
 
         let status = match self.locals.get(offset) {
-            Some(dist) => {
-                self.environment.borrow_mut().assign_at(name, value.clone(), *dist)
+            Some(binding) => {
+                self.environment.as_mut().unwrap().borrow_mut().assign_at(&binding, Some(value.clone()));
+                true
             },
             None => {
-                self.globals.borrow_mut().assign(name, value.clone())
+                self.globals.assign(name, Some(value.clone()))
             },
         };
 
@@ -276,7 +283,7 @@ impl Interpreter {
     }
 
     #[inline(always)]
-    fn visit_lambda_expr(&mut self, params: &[String], body: &[Stmt]) -> InterpreterResult<Value> {
+    fn visit_lambda_expr(&mut self, params: &[(String, usize)], body: &[Stmt]) -> InterpreterResult<Value> {
         Ok(Value::Function {
             params: params.to_vec(),
             body: body.to_vec(),
@@ -371,8 +378,8 @@ impl Interpreter {
     #[inline(always)]
     fn visit_var_expr(&mut self, name: &str, line: &usize, offset: &usize) -> InterpreterResult<Value> {
         let value = match self.locals.get(offset) {
-            Some(dist) => self.environment.borrow().get_at(name, *dist),
-            None => self.globals.borrow().get(name),
+            Some(binding) => self.environment.as_ref().unwrap().borrow().get_at(binding),
+            None => self.globals.get(name),
         };
 
         match value {
@@ -404,14 +411,24 @@ impl Interpreter {
     }
     
     #[inline(always)]
-    fn visit_var_stmt(&mut self, name: &str, initializer: &Option<Expr>) -> InterpreterResult<()> {
+    fn visit_var_stmt(&mut self, name: &str, initializer: &Option<Expr>, offset: usize) -> InterpreterResult<()> {
         let value = if let Some(expr) = initializer {
             Some(self.visit_expr(expr)?)
         } else {
             None
         };
-        
-        self.environment.borrow_mut().define(name, value);
+
+        match self.locals.get(&offset) {
+            Some(binding) => self.environment
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .assign_at(
+                    binding,
+                    value
+                ),
+            None => {self.globals.define(name, value);},
+        };
         
         Ok(())
     }
@@ -453,7 +470,7 @@ impl Interpreter {
                         }
                     }
                     
-                    self.environment.borrow_mut().clear()
+                    self.environment.as_mut().unwrap().borrow_mut().clear()
                 }
                 
                 self.remove_new_env();
@@ -477,15 +494,24 @@ impl Interpreter {
         })
     }
 
-    fn visit_function_stmt(&mut self, name: &str, params: &[String], body: &[Stmt]) -> InterpreterResult<()> {
-        self.environment.borrow_mut().define(
-            name,
-            Some(Value::Function {
-                params: params.to_vec(),
-                body: body.to_vec(),
-                closure: self.environment.clone()
-            })
-        );
+    fn visit_function_stmt(&mut self, name: &str, params: &[(String, usize)], body: &[Stmt], offset: usize) -> InterpreterResult<()> {
+        let func = Some(Value::Function {
+            params: params.to_vec(),
+            body: body.to_vec(),
+            closure: self.environment.clone()
+        });
+
+        match self.locals.get(&offset) {
+            Some(binding) => self.environment
+                .as_mut()
+                .unwrap()
+                .borrow_mut()
+                .assign_at(
+                    binding,
+                    func
+                ),
+            None => {self.globals.define(name, func);},
+        };
 
         Ok(())
     }
@@ -557,20 +583,19 @@ impl Interpreter {
     #[inline(always)]
     fn create_new_env(&mut self) {
         let enclosing = self.environment.clone();
-        self.environment = Rc::new(RefCell::new(Environment::new(Some(enclosing))));
+        self.environment = Some(Rc::new(RefCell::new(LocalEnvironment::new(enclosing))));
     }
 
     #[inline(always)]
     fn remove_new_env(&mut self) {
-        let mut env = self.environment.borrow_mut();
-        if let Some(enclosing) = env.enclosing.take() {
-            drop(env);
-            self.environment = enclosing;
-        }
+        let mut env = self.environment.as_mut().unwrap().borrow_mut();
+        let enclosing = env.enclosing.take();
+        drop(env);
+        self.environment = enclosing;
     }
 
     #[inline(always)]
-    pub fn resolve(&mut self, offset: usize, depth: usize) {
-        self.locals.insert(offset, depth);
+    pub fn resolve(&mut self, offset: usize, binding: Binding) {
+        self.locals.insert(offset, binding);
     }
 }

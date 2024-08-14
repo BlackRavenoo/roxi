@@ -15,16 +15,18 @@ pub enum Stmt {
     Var {
         name: String,
         initializer: Option<Expr>,
-        line: usize
+        line: usize,
+        offset: usize
     },
     Block {
         statements: Vec<Stmt>
     },
     Function {
         name: String,
-        params: Vec<String>,
+        params: Vec<(String, usize)>,
         body: Vec<Stmt>,
-        line: usize
+        line: usize,
+        offset: usize
     },
     If {
         condition: Expr,

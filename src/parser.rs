@@ -142,6 +142,7 @@ impl<'a> Parser<'a> {
         };
 
         let line = self.token.get_line();
+        let offset = self.token.get_offset();
 
         self.advance();
         
@@ -154,7 +155,7 @@ impl<'a> Parser<'a> {
 
         if self.token.kind == TokenKind::Semicolon {
             self.advance();
-            Ok(Stmt::Var {name, initializer, line})
+            Ok(Stmt::Var {name, initializer, line, offset})
         } else {
             Err(self.unexpected_token(format!("'{}'. Expected ';'.", self.token.get_lexeme())))
         }
@@ -306,6 +307,7 @@ impl<'a> Parser<'a> {
         }
         let name = self.token.get_lexeme().to_owned();
         let line = self.token.get_line();
+        let offset = self.token.get_offset();
         self.advance();
         if self.token.kind != TokenKind::LeftParen {
             return Err(self.unexpected_token(format!("'{}'. Expected '('.", self.token.get_lexeme())))
@@ -314,14 +316,14 @@ impl<'a> Parser<'a> {
 
         let params = if self.token.kind != TokenKind::RightParen {
             let mut params = Vec::with_capacity(4);
-            params.push(self.token.get_lexeme().to_owned());
+            params.push((self.token.get_lexeme().to_owned(), self.token.get_offset()));
             self.advance();
             while !self.is_at_end() && self.token.kind == TokenKind::Comma {
                 if params.len() > 255 {
                     eprintln!("[line {}] Error: Can't have more than 255 arguments.", self.token.get_line());
                 }
                 self.advance();
-                params.push(self.token.get_lexeme().to_owned());
+                params.push((self.token.get_lexeme().to_owned(), self.token.get_offset()));
                 self.advance();
             } 
             params
@@ -343,6 +345,7 @@ impl<'a> Parser<'a> {
             params,
             body,
             line,
+            offset
         })
     }
 
@@ -665,14 +668,14 @@ impl<'a> Parser<'a> {
             if self.token.kind != TokenKind::Identifier {
                 return Err(self.unexpected_token(format!("'{}'. Expected identifier.", self.token.get_lexeme())));
             }
-            params.push(self.token.get_lexeme().to_owned());
+            params.push((self.token.get_lexeme().to_owned(), self.token.get_offset()));
             self.advance();
             while self.token.kind == TokenKind::Comma {
                 self.advance();
                 if self.token.kind != TokenKind::Identifier {
                     return Err(self.unexpected_token(format!("'{}'. Expected identifier.", self.token.get_lexeme())));
                 }
-                params.push(self.token.get_lexeme().to_owned());
+                params.push((self.token.get_lexeme().to_owned(), self.token.get_offset()));
                 self.advance();
             }
             params

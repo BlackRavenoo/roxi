@@ -1,27 +1,23 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc, time::{SystemTime, UNIX_EPOCH}};
 use wyhash2::WyHash;
 
-use crate::interpreter::Value;
+use crate::{interpreter::Value, resolver::Binding};
 
-#[derive(Debug)]
-pub struct Environment {
-    pub enclosing: Option<Rc<RefCell<Environment>>>,
+pub struct GlobalEnvironment {
     values: HashMap<String, Option<Value>, WyHash>
 }
 
-
-impl Environment {
+impl GlobalEnvironment {
     #[inline(always)]
-    pub fn new(enclosing: Option<Rc<RefCell<Environment>>>) -> Self {
+    pub fn new() -> Self {
         Self {
-            enclosing,
-            values: HashMap::with_hasher(WyHash::with_seed(594)),
+            values: HashMap::with_capacity_and_hasher(4, WyHash::with_seed(0))
         }
     }
 
     #[inline(always)]
     pub fn new_global_env() -> Self {
-        let mut env = Environment::new(None);
+        let mut env = GlobalEnvironment::new();
         env.define(
             "clock",
             Some(Value::NativeFunction {
@@ -46,45 +42,69 @@ impl Environment {
     }
 
     #[inline(always)]
-    pub fn assign(&mut self, name: &str, value: Value) -> bool {
-        if self.values.contains_key(name) {
-            self.values.entry(name.to_string()).or_insert(None).replace(value);
+    pub fn assign(&mut self, name: &str, value: Option<Value>) -> bool {
+        if let Some(var) = self.values.get_mut(name) {
+            *var = value;
             true
         } else {
             false
         }
     }
-
-    #[inline(always)]
-    pub fn assign_at(&mut self, name: &str, value: Value, dist: usize) -> bool {
-        if dist == 0 {
-            self.assign(name, value)
-        } else {
-            self.ancestor(dist).borrow_mut().assign(name, value)
-        }
-    }
     
     #[inline(always)]
     pub fn get(&self, name: &str) -> Option<Option<Value>> {
-        if let Some(value) = self.values.get(name) {
-            Some(value.clone())
-        } else {
-            None
-        }
+        self.values.get(name).cloned()
+    }
+}
 
+#[derive(Debug)]
+pub struct LocalEnvironment {
+    pub enclosing: Option<Rc<RefCell<LocalEnvironment>>>,
+    values: Vec<Option<Value>>,
+}
+
+impl LocalEnvironment {
+    #[inline(always)]
+    pub fn new(enclosing: Option<Rc<RefCell<LocalEnvironment>>>) -> Self {
+        Self {
+            enclosing,
+            values: Vec::with_capacity(4),
+        }
     }
 
     #[inline(always)]
-    pub fn get_at(&self, name: &str, dist: usize) -> Option<Option<Value>> {
-        if dist == 0 {
-            self.values.get(name).cloned()
+    pub fn assign(&mut self, binding: &Binding, value: Option<Value>) {
+        if self.values.capacity() <= binding.index {
+            self.values.reserve(1 + binding.index - self.values.capacity());
+        }
+
+        while self.values.len() <= binding.index {
+            self.values.push(None)
+        }
+
+        self.values[binding.index] = value;
+    }
+
+    #[inline(always)]
+    pub fn assign_at(&mut self, binding: &Binding, value: Option<Value>) {
+        if binding.scopes_up == 0 {
+            self.assign(binding, value)
         } else {
-            self.ancestor(dist).borrow().values.get(name).cloned()
+            self.ancestor(binding.index).borrow_mut().assign(binding, value)
         }
     }
 
     #[inline(always)]
-    pub fn ancestor(&self, dist: usize) -> Rc<RefCell<Environment>> {
+    pub fn get_at(&self, binding: &Binding) -> Option<Option<Value>> {
+        if binding.scopes_up == 0 {
+            self.values.get(binding.index).cloned()
+        } else {
+            self.ancestor(binding.scopes_up).borrow().values.get(binding.index).cloned()
+        }
+    }
+
+    #[inline(always)]
+    pub fn ancestor(&self, dist: usize) -> Rc<RefCell<LocalEnvironment>> {
         let mut current = self.enclosing.clone();
         
         for _ in 1..dist {

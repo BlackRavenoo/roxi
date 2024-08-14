@@ -24,19 +24,19 @@ impl Display for ResolverError {
         match self {
             ResolverError::SelfRefInitializer { name, line } => write!(
                 f,
-                "[line {}] Can't read local variable `{}` in its own initializer.",
+                "[line {}] Error: Can't read local variable `{}` in its own initializer.",
                 line,
                 name
             ),
             ResolverError::ReDeclaration { name, line } => write!(
                 f,
-                "[line {}] Variable `{}` already exists in this scope.",
+                "[line {}] Error: Variable `{}` already exists in this scope.",
                 line,
                 name
             ),
             ResolverError::ReturnOutsideFunction { line } => write!(
                 f,
-                "[line {}] `return` outside function.",
+                "[line {}] Error: `return` outside function.",
                 line
             )
         }
@@ -51,16 +51,48 @@ enum FunctionKind {
     Function
 }
 
-#[derive(PartialEq)]
+#[derive(Debug)]
+pub struct Binding {
+    pub scopes_up: usize,
+    pub index: usize
+}
+
+impl Binding {
+    #[inline(always)]
+    pub fn new(scopes_up: usize, index: usize) -> Self {
+        Self {
+            scopes_up,
+            index
+        }
+    }
+}
+
+#[derive(PartialEq, Debug)]
 enum VariableState {
     Declared,
     Defined,
     Used
 }
 
+#[derive(Debug)]
+struct VariableData {
+    state: VariableState,
+    index: usize
+}
+
+impl VariableData {
+    #[inline(always)]
+    fn new(state: VariableState, index: usize) -> Self {
+        Self {
+            state,
+            index
+        }
+    }
+}
+
 pub struct Resolver<'a> {
     interpreter: &'a mut Interpreter,
-    scopes: Vec<HashMap<String, VariableState, WyHash>>,
+    scopes: Vec<HashMap<String, VariableData, WyHash>>,
     current_function: FunctionKind
 }
 
@@ -71,9 +103,9 @@ impl StmtVisitor<ResolverResult<()>> for Resolver<'_> {
             Stmt::Expr(expr) => self.visit_expr(expr),
             Stmt::Print(expr) => self.visit_expr(expr),
             Stmt::Return { value, line } => self.visit_return_stmt(value, line),
-            Stmt::Var { name, initializer, line } => self.visit_var_stmt(name, initializer, line),
+            Stmt::Var { name, initializer, line, offset } => self.visit_var_stmt(name, initializer, line, *offset),
             Stmt::Block { statements } => self.visit_block_stmt(statements),
-            Stmt::Function { name, params, body, line } => self.visit_function_stmt(name, params, body, *line),
+            Stmt::Function { name, params, body, line, offset } => self.visit_function_stmt(name, params, body, *line, *offset),
             Stmt::If { condition, then_branch, else_branch } => self.visit_if_stmt(condition, then_branch, else_branch),
             Stmt::While { condition, body } => self.visit_while_stmt(condition, body),
             Stmt::Break { .. } => Ok(()),
@@ -117,10 +149,11 @@ impl Resolver<'_> {
     }
 
     fn resolve_local(&mut self, name: &str, offset: usize) {
+        let scopes_len = self.scopes.len();
         for (i, scope) in self.scopes.iter_mut().enumerate().rev() {
             if let Some(var) = scope.get_mut(name) {
-                *var = VariableState::Used;
-                self.interpreter.resolve(offset, self.scopes.len() - 1 - i);
+                var.state = VariableState::Used;
+                self.interpreter.resolve(offset, Binding::new(scopes_len - 1 - i, var.index));
                 return;
             }
         }
@@ -132,8 +165,8 @@ impl Resolver<'_> {
     
     fn end_scope(&mut self) {
         if let Some(scope) = self.scopes.pop() {
-            for (name, state) in scope {
-                if state != VariableState::Used {
+            for (name, var) in scope {
+                if var.state != VariableState::Used {
                     eprintln!("Warning: Unused local variable `{}`.", name)
                 }
             }
@@ -145,14 +178,16 @@ impl Resolver<'_> {
             if scope.contains_key(name) {
                 return Err(ResolverError::ReDeclaration { name: name.to_string(), line })
             }
-            scope.insert(name.to_string(), VariableState::Declared);
+            scope.insert(name.to_string(), VariableData::new(VariableState::Declared, scope.len()));
         }
         Ok(())
     }
 
     fn define(&mut self, name: &str) {
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), VariableState::Defined);
+            if let Some(var) = scope.get_mut(name) {
+                var.state = VariableState::Defined
+            }
         }
     }
 
@@ -165,7 +200,7 @@ impl Resolver<'_> {
     }
     
     #[inline(always)]
-    fn visit_var_stmt(&mut self, name: &str, initializer: &Option<Expr>, line: &usize) -> ResolverResult<()>  {
+    fn visit_var_stmt(&mut self, name: &str, initializer: &Option<Expr>, line: &usize, offset: usize) -> ResolverResult<()>  {
         self.declare(name, *line)?;
         let res = if let Some(initializer) = initializer {
             self.visit_expr(initializer)
@@ -173,6 +208,7 @@ impl Resolver<'_> {
             Ok(())
         };
         self.define(name);
+        self.resolve_local(name, offset);
         res
     }
 
@@ -185,10 +221,12 @@ impl Resolver<'_> {
     }
 
     #[inline(always)]
-    fn visit_function_stmt(&mut self, name: &str, params: &[String], body: &[Stmt], line: usize) -> ResolverResult<()> {
+    fn visit_function_stmt(&mut self, name: &str, params: &[(String, usize)], body: &[Stmt], line: usize, offset: usize) -> ResolverResult<()> {
         self.declare(name, line)?;
         self.define(name);
-        self.resolve_function(params, body, line, FunctionKind::Function)
+        self.resolve_function(params, body, line, FunctionKind::Function)?;
+        self.resolve_local(name, offset);
+        Ok(())
     }
 
     #[inline(always)]
@@ -242,7 +280,7 @@ impl Resolver<'_> {
     #[inline(always)]
     fn visit_variable_expr(&mut self, name: &str, line: &usize, offset: &usize) -> ResolverResult<()> {
         if let Some(scope) = self.scopes.last() {
-            if scope.get(name) == Some(&VariableState::Declared) {
+            if let Some(VariableData { state: VariableState::Declared, .. }) = scope.get(name) {
                 return Err(ResolverError::SelfRefInitializer { name: name.to_owned(), line: *line })
             }
         }
@@ -261,16 +299,17 @@ impl Resolver<'_> {
     #[inline(always)]
     fn resolve_function(
         &mut self,
-        params: &[String],
+        params: &[(String, usize)],
         body: &[Stmt],
         line: usize,
         kind: FunctionKind
     ) -> ResolverResult<()> {
         let enclosing_function = std::mem::replace(&mut self.current_function, kind);
         self.begin_scope();
-        for param in params {
+        for (param, offset) in params {
             self.declare(param, line)?;
             self.define(param);
+            self.resolve_local(param, *offset)
         }
         self.resolve_stmts(body)?;
         self.end_scope();

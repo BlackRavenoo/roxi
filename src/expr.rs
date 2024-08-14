@@ -42,7 +42,7 @@ pub enum Expr {
         operator: BinaryOp
     },
     Lambda {
-        params: Vec<String>,
+        params: Vec<(String, usize)>,
         body: Vec<Stmt>
     }
 }
