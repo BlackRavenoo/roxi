@@ -24,6 +24,11 @@ pub enum Expr {
         line: usize,
         exprs: Vec<Expr>,
     },
+    Get {
+        name: String,
+        object: Box<Expr>,
+        line: usize
+    },
     Literal(Literal),
     Unary {
         operator: UnaryOp,

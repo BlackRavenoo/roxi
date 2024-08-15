@@ -9,6 +9,8 @@ enum ErrorKind {
     UninitializedVariable,
     UndefinedVariable,
     NotCallable,
+    GetOnNonInstance(Value),
+    UndefinedProperty,
     WrongArity(usize),
     Return(Value),
     Break
@@ -70,6 +72,19 @@ impl Display for InterpreterError {
                 "[line {}] Error: `return` outside function.",
                 self.line
             ),
+            ErrorKind::GetOnNonInstance(ref val) => write!(
+                f,
+                "[line {}] Error: Tried to access field `{}` on {}.",
+                self.line,
+                self.msg,
+                val
+            ),
+            ErrorKind::UndefinedProperty => write!(
+                f,
+                "[line {}] Error: Undefined property `{}`.",
+                self.line,
+                self.msg
+            ),
         }
     }
 }
@@ -92,7 +107,8 @@ pub enum Value {
     },
     Class(Class),
     Instance {
-        class: Class 
+        class: Class,
+        fields: HashMap<String, Value>
     },
     Nil,
 }
@@ -147,7 +163,7 @@ impl Value {
                 res
             },
             Value::Class(Class { name }) => {
-                Ok(Value::Instance { class: Class { name } })
+                Ok(Value::Instance { class: Class { name }, fields: HashMap::new() })
             },
             _ => Err(InterpreterError {
                 msg: String::new(),
@@ -166,9 +182,9 @@ impl Display for Value {
             Value::Bool(bool) => write!(f, "{}", bool),
             Value::Nil => write!(f, "nil"),
             Value::NativeFunction { .. } => write!(f, "native_func"),
-            Value::Function { params, body, ..  } => write!(f, "func({:?}) {{\n{:?}\n}}", params, body),
+            Value::Function { ..  } => write!(f, "func"),
             Value::Class(Class { name }) => write!(f, "{}", name),
-            Value::Instance { class: Class { name } } => write!(f, "{} instance", name),
+            Value::Instance { class: Class { name }, .. } => write!(f, "{} instance", name),
         }
     }
 }
@@ -198,6 +214,7 @@ impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
             Expr::Logical { values, operator } => self.visit_logical_expr(&values.0, operator, &values.1),
             Expr::Call { line, exprs } => self.visit_call_expr(line, &exprs[0], &exprs[1..]),
             Expr::Lambda { params, body } => self.visit_lambda_expr(params, body),
+            Expr::Get { name, object, line } => self.visit_get_expr(name, object, *line),
         }
     }
 }
@@ -305,6 +322,26 @@ impl Interpreter {
             body: body.to_vec(),
             closure: self.environment.clone()
         })
+    }
+
+    #[inline(always)]
+    fn visit_get_expr(&mut self, name: &str, object: &Expr, line: usize) -> InterpreterResult<Value> {
+        let object = self.visit_expr(object)?;
+        match object {
+            Value::Instance { fields, ..} => match fields.get(name) {
+                Some(val) => Ok(val.clone()),
+                None => Err(InterpreterError {
+                    msg: name.to_owned(),
+                    line,
+                    kind: ErrorKind::UndefinedProperty,
+                }),
+            },
+            _ => Err(InterpreterError {
+                msg: name.to_owned(),
+                line,
+                kind: ErrorKind::GetOnNonInstance(object),
+            })
+        }
     }
 
     #[inline(always)]
@@ -594,7 +631,7 @@ impl Interpreter {
             Value::NativeFunction { .. } => "native_func".to_owned(),
             Value::Function { .. } => "func".to_owned(),
             Value::Class(Class { name }) => format!("class {}", name),
-            Value::Instance { class } => todo!(),
+            Value::Instance { class, fields } => todo!(),
         };
         Err(
             InterpreterError {

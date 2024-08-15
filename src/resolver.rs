@@ -127,6 +127,7 @@ impl ExprVisitor<ResolverResult<()>> for Resolver<'_> {
             Expr::Variable { name, line, offset } => self.visit_variable_expr(name, line, offset),
             Expr::Logical { values, .. } => self.visit_logical_expr(&values.0, &values.1),
             Expr::Lambda { params, body } => self.resolve_function(params, body, 0, FunctionKind::Function),
+            Expr::Get { object, .. } => self.visit_expr(&object),
         }
     }
 }

@@ -15,7 +15,7 @@ impl AstPrinter {
             Stmt::If { condition, .. } => println!("if {}", AstPrinter::visit(condition)),
             Stmt::While { body, .. } => {println!("while "); AstPrinter::print(&body);},
             Stmt::Break { .. } => todo!(),
-            Stmt::Class { name, methods, line, offset } => todo!(),
+            Stmt::Class { .. } => todo!(),
         }
     }
 }
@@ -55,6 +55,7 @@ impl Visitor<String> for AstPrinter {
             Expr::Logical { .. } => todo!(),
             Expr::Call { exprs, .. } => parenthesize("call ", &exprs.iter().collect::<Vec<_>>()),
             Expr::Lambda { .. } => todo!(),
+            Expr::Get { .. } => todo!(),
         }
     }
 }

@@ -657,9 +657,26 @@ impl<'a> Parser<'a> {
     fn call(&mut self) -> ParserResult<Expr> {
         let mut expr = self.primary()?;
 
-        if self.token.kind == TokenKind::LeftParen {
-            self.advance();
-            expr = self.finish_call(expr)?;
+        loop {
+            match self.token.kind {
+                TokenKind::LeftParen => {
+                    self.advance();
+                    expr = self.finish_call(expr)?;
+                },
+                TokenKind::Dot => {
+                    self.advance();
+                    if self.token.kind != TokenKind::Identifier {
+                        return Err(self.unexpected_token(format!("'{}'. Expected property name.", self.token.get_lexeme())))
+                    }
+                    expr = Expr::Get { 
+                        name: self.token.get_lexeme().to_owned(),
+                        object: Box::new(expr),
+                        line: self.token.get_line()
+                    };
+                    self.advance();
+                },
+                _ => break
+            } 
         }
 
         Ok(expr)
