@@ -109,6 +109,7 @@ impl StmtVisitor<ResolverResult<()>> for Resolver<'_> {
             Stmt::If { condition, then_branch, else_branch } => self.visit_if_stmt(condition, then_branch, else_branch),
             Stmt::While { condition, body } => self.visit_while_stmt(condition, body),
             Stmt::Break { .. } => Ok(()),
+            Stmt::Class { name, line, offset, .. } => self.visit_class_stmt(name, line, offset),
         }
     }
 }
@@ -244,6 +245,14 @@ impl Resolver<'_> {
     fn visit_while_stmt(&mut self, condition: &Expr, body: &Stmt) -> ResolverResult<()> {
         self.visit_expr(condition)?;
         self.visit_stmt(body)
+    }
+
+    #[inline(always)]
+    fn visit_class_stmt(&mut self, name: &str, line: &usize, offset: &usize) -> ResolverResult<()> {
+        self.declare(name, *line)?;
+        self.define(name);
+        self.resolve_local(name, *offset);
+        Ok(())
     }
 
     #[inline(always)]

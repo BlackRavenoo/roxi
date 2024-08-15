@@ -15,6 +15,7 @@ impl AstPrinter {
             Stmt::If { condition, .. } => println!("if {}", AstPrinter::visit(condition)),
             Stmt::While { body, .. } => {println!("while "); AstPrinter::print(&body);},
             Stmt::Break { .. } => todo!(),
+            Stmt::Class { name, methods, line, offset } => todo!(),
         }
     }
 }

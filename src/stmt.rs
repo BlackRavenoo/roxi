@@ -21,6 +21,12 @@ pub enum Stmt {
     Block {
         statements: Vec<Stmt>
     },
+    Class {
+        name: String,
+        methods: Vec<Stmt>,
+        line: usize,
+        offset: usize
+    },
     Function {
         name: String,
         params: Vec<(String, usize)>,

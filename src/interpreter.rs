@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fmt::{write, Display}, rc::Rc};
 
 use crate::{environment::{GlobalEnvironment, LocalEnvironment}, expr::{BinaryOp, BinaryOpKind, Expr, ExprVisitor, Literal, UnaryOp, UnaryOpKind}, resolver::Binding, stmt::{Stmt, StmtVisitor}};
 
@@ -86,11 +86,20 @@ pub enum Value {
         fun: fn(&mut Interpreter, Vec<Value>) -> Value
     },
     Function {
-        params: Vec<(String, usize)>,
+        params: Vec<usize>,
         body: Vec<Stmt>,
         closure: Option<Rc<RefCell<LocalEnvironment>>>
     },
+    Class(Class),
+    Instance {
+        class: Class 
+    },
     Nil,
+}
+
+#[derive(Clone, Debug)]
+pub struct Class {
+    name: String
 }
 
 impl Value {
@@ -98,6 +107,7 @@ impl Value {
         match self {
             Value::NativeFunction { arity,.. } => Ok(*arity),
             Value::Function { params, .. } => Ok(params.len() as u16),
+            Value::Class { .. } => Ok(0),
             _ => Err(InterpreterError {
                 msg: String::new(),
                 line: *line,
@@ -113,7 +123,7 @@ impl Value {
                 let mut env = Some(Rc::new(RefCell::new(LocalEnvironment::new(closure.clone()))));
                 std::mem::swap(&mut interpreter.environment, &mut env);
 
-                for ((_, offset), arg) in params.iter().zip(args.into_iter()) {
+                for (offset, arg) in params.iter().zip(args.into_iter()) {
                     interpreter.environment
                         .as_mut()
                         .unwrap()
@@ -135,7 +145,10 @@ impl Value {
                 interpreter.environment = env;
 
                 res
-            }
+            },
+            Value::Class(Class { name }) => {
+                Ok(Value::Instance { class: Class { name } })
+            },
             _ => Err(InterpreterError {
                 msg: String::new(),
                 line: *line,
@@ -154,6 +167,8 @@ impl Display for Value {
             Value::Nil => write!(f, "nil"),
             Value::NativeFunction { .. } => write!(f, "native_func"),
             Value::Function { params, body, ..  } => write!(f, "func({:?}) {{\n{:?}\n}}", params, body),
+            Value::Class(Class { name }) => write!(f, "{}", name),
+            Value::Instance { class: Class { name } } => write!(f, "{} instance", name),
         }
     }
 }
@@ -200,6 +215,7 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
             Stmt::Break { line } => self.visit_break_stmt(line),
             Stmt::Function { name, params, body, offset, .. } => self.visit_function_stmt(name, params, body, *offset),
             Stmt::Return { line, value } => self.visit_return_stmt(line, value),
+            Stmt::Class { name, methods, offset, .. } => self.visit_class_stmt(name, methods, offset),
         }
     }
 }
@@ -285,7 +301,7 @@ impl Interpreter {
     #[inline(always)]
     fn visit_lambda_expr(&mut self, params: &[(String, usize)], body: &[Stmt]) -> InterpreterResult<Value> {
         Ok(Value::Function {
-            params: params.to_vec(),
+            params: params.into_iter().map(|x| x.1).collect(),
             body: body.to_vec(),
             closure: self.environment.clone()
         })
@@ -496,7 +512,7 @@ impl Interpreter {
 
     fn visit_function_stmt(&mut self, name: &str, params: &[(String, usize)], body: &[Stmt], offset: usize) -> InterpreterResult<()> {
         let func = Some(Value::Function {
-            params: params.to_vec(),
+            params: params.into_iter().map(|x| x.1).collect(),
             body: body.to_vec(),
             closure: self.environment.clone()
         });
@@ -516,6 +532,7 @@ impl Interpreter {
         Ok(())
     }
 
+    #[inline(always)]
     fn visit_return_stmt(&mut self, line: &usize, value: &Expr) -> InterpreterResult<()> {
         Err(InterpreterError{
             msg: String::new(),
@@ -530,6 +547,22 @@ impl Interpreter {
         })
     }
 
+    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], offset: &usize) -> InterpreterResult<()> {
+        match self.locals.get(offset) {
+            Some(binding) => self.environment
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .assign_at(
+                    binding,
+                    Some(Value::Class(Class { name: name.to_owned() }))
+                ),
+            None => self.globals.define(name, Some(Value::Class(Class { name: name.to_owned() })))
+        };
+
+        Ok(())
+    }
+
     #[inline(always)]
     fn is_truthy(value: &Value) -> bool {
         match value {
@@ -537,8 +570,7 @@ impl Interpreter {
             Value::Bool(bool) => *bool,
             Value::Number(num) => *num != 0.0,
             Value::Nil => false,
-            Value::NativeFunction { .. } => true,
-            Value::Function { .. } => true,
+            _ => true
         }
     }
 
@@ -561,6 +593,8 @@ impl Interpreter {
             Value::Nil => String::from("nil"),
             Value::NativeFunction { .. } => "native_func".to_owned(),
             Value::Function { .. } => "func".to_owned(),
+            Value::Class(Class { name }) => format!("class {}", name),
+            Value::Instance { class } => todo!(),
         };
         Err(
             InterpreterError {

@@ -118,6 +118,8 @@ impl<'a> Parser<'a> {
 
     fn declaration(&mut self) -> ParserResult<Stmt> {
         let result = match self.token.kind {
+            TokenKind::Class => self.class_statement(),
+            TokenKind::Fun => { self.advance(); self.fun_statement() },
             TokenKind::Var => self.var_declaration(),
             _ => self.statement()
         };
@@ -167,7 +169,6 @@ impl<'a> Parser<'a> {
             TokenKind::While => self.while_statement(),
             TokenKind::For => self.for_statement(),
             TokenKind::Break => self.break_statement(),
-            TokenKind::Fun => self.fun_statement(),
             TokenKind::Return => self.return_statement(),
             TokenKind::LeftBrace => {
                 let mut block = self.block()?;
@@ -300,8 +301,50 @@ impl<'a> Parser<'a> {
 
     }
 
-    fn fun_statement(&mut self) -> ParserResult<Stmt> {
+    fn class_statement(&mut self) -> ParserResult<Stmt> {
+        let line = self.token.get_line();
         self.advance();
+
+        if self.token.kind != TokenKind::Identifier {
+            return Err(self.unexpected_token(format!("'{}'. Expected class name.", self.token.get_lexeme())))
+        }
+
+        let name = self.token.get_lexeme().to_owned();
+        let offset = self.token.get_offset();
+
+        self.advance();
+        if self.token.kind != TokenKind::LeftBrace {
+            return Err(self.unexpected_token(format!("'{}'. Expected '{{'.", self.token.get_lexeme())))
+        }
+        self.advance();
+
+        let methods = if self.token.kind == TokenKind::RightBrace {
+            Vec::new()
+        } else {
+            let mut methods = Vec::with_capacity(4);
+            methods.push(self.fun_statement()?);
+            while !self.is_at_end() && self.token.kind != TokenKind::RightBrace {
+                methods.push(self.fun_statement()?);
+            }
+
+            methods
+        };
+
+        if self.token.kind != TokenKind::RightBrace {
+            return Err(self.unexpected_token(format!("'{}'. Expected '}}'.", self.token.get_lexeme())))
+        }
+        self.advance();
+
+
+        Ok(Stmt::Class {
+            name,
+            methods,
+            line,
+            offset
+        })
+    }
+
+    fn fun_statement(&mut self) -> ParserResult<Stmt> {
         if self.token.kind != TokenKind::Identifier {
             return Err(self.unexpected_token(format!("'{}'. Expected function name.", self.token.get_lexeme())))
         }
