@@ -507,6 +507,8 @@ impl<'a> Parser<'a> {
             self.advance();
             if let Expr::Variable { name, line, offset } = expr {
                 expr = Expr::Assign { name, value: Box::new(self.assignment()?), line, offset }
+            } else if let Expr::Get { name, object, line } = expr {
+                expr = Expr::Set { name, object, value: Box::new(self.assignment()?), line }
             } else {
                 return Err(
                     ParserError {

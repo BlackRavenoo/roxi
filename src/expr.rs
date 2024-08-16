@@ -29,6 +29,12 @@ pub enum Expr {
         object: Box<Expr>,
         line: usize
     },
+    Set {
+        name: String,
+        object: Box<Expr>,
+        value: Box<Expr>,
+        line: usize
+    },
     Literal(Literal),
     Unary {
         operator: UnaryOp,

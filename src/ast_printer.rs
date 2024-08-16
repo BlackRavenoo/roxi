@@ -56,6 +56,7 @@ impl Visitor<String> for AstPrinter {
             Expr::Call { exprs, .. } => parenthesize("call ", &exprs.iter().collect::<Vec<_>>()),
             Expr::Lambda { .. } => todo!(),
             Expr::Get { .. } => todo!(),
+            Expr::Set { .. } => todo!(),
         }
     }
 }

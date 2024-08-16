@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, fmt::{write, Display}, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc};
 
 use crate::{environment::{GlobalEnvironment, LocalEnvironment}, expr::{BinaryOp, BinaryOpKind, Expr, ExprVisitor, Literal, UnaryOp, UnaryOpKind}, resolver::Binding, stmt::{Stmt, StmtVisitor}};
 
@@ -9,10 +9,10 @@ enum ErrorKind {
     UninitializedVariable,
     UndefinedVariable,
     NotCallable,
-    GetOnNonInstance(Value),
+    PropertyOnNonInstance(Rc<RefCell<Value>>),
     UndefinedProperty,
     WrongArity(usize),
-    Return(Value),
+    Return(Rc<RefCell<Value>>),
     Break
 }
 
@@ -72,12 +72,12 @@ impl Display for InterpreterError {
                 "[line {}] Error: `return` outside function.",
                 self.line
             ),
-            ErrorKind::GetOnNonInstance(ref val) => write!(
+            ErrorKind::PropertyOnNonInstance(ref val) => write!(
                 f,
                 "[line {}] Error: Tried to access field `{}` on {}.",
                 self.line,
                 self.msg,
-                val
+                val.as_ref().borrow()
             ),
             ErrorKind::UndefinedProperty => write!(
                 f,
@@ -98,17 +98,17 @@ pub enum Value {
     Bool(bool),
     NativeFunction {
         arity: u16,
-        fun: fn(&mut Interpreter, Vec<Value>) -> Value
+        fun: fn(&mut Interpreter, Vec<Rc<RefCell<Value>>>) -> Value
     },
     Function {
         params: Vec<usize>,
         body: Vec<Stmt>,
         closure: Option<Rc<RefCell<LocalEnvironment>>>
     },
-    Class(Class),
+    Class(Rc<RefCell<Class>>),
     Instance {
-        class: Class,
-        fields: HashMap<String, Value>
+        class: Rc<RefCell<Class>>,
+        fields: HashMap<String, Rc<RefCell<Value>>>
     },
     Nil,
 }
@@ -116,6 +116,12 @@ pub enum Value {
 #[derive(Clone, Debug)]
 pub struct Class {
     name: String
+}
+
+impl Display for Class {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
 }
 
 impl Value {
@@ -132,9 +138,9 @@ impl Value {
         }
     }
 
-    pub fn call(self, line: &usize, interpreter: &mut Interpreter, args: Vec<Value>) -> InterpreterResult<Value> {
+    pub fn call(&self, line: &usize, interpreter: &mut Interpreter, args: Vec<Rc<RefCell<Value>>>) -> InterpreterResult<Rc<RefCell<Value>>> {
         match self {
-            Value::NativeFunction { fun, .. } => Ok(fun(interpreter, args)),
+            Value::NativeFunction { fun, .. } => Ok(Rc::new(RefCell::new(fun(interpreter, args)))),
             Value::Function { params, body, closure } => {
                 let mut env = Some(Rc::new(RefCell::new(LocalEnvironment::new(closure.clone()))));
                 std::mem::swap(&mut interpreter.environment, &mut env);
@@ -151,7 +157,7 @@ impl Value {
                 }
 
                 let res = match interpreter.execute_block(&body) {
-                    Ok(_) => Ok(Value::Nil),
+                    Ok(_) => Ok(Rc::new(RefCell::new(Value::Nil))),
                     Err(e) => match e.kind {
                         ErrorKind::Return(value) => Ok(value),
                         _ => Err(e)
@@ -162,9 +168,7 @@ impl Value {
 
                 res
             },
-            Value::Class(Class { name }) => {
-                Ok(Value::Instance { class: Class { name }, fields: HashMap::new() })
-            },
+            Value::Class(class) => Ok(Rc::new(RefCell::new(Value::Instance {class: Rc::clone(class), fields: HashMap::new()}))),
             _ => Err(InterpreterError {
                 msg: String::new(),
                 line: *line,
@@ -183,12 +187,11 @@ impl Display for Value {
             Value::Nil => write!(f, "nil"),
             Value::NativeFunction { .. } => write!(f, "native_func"),
             Value::Function { ..  } => write!(f, "func"),
-            Value::Class(Class { name }) => write!(f, "{}", name),
-            Value::Instance { class: Class { name }, .. } => write!(f, "{} instance", name),
+            Value::Class(class) => write!(f, "{}", class.as_ref().borrow()),
+            Value::Instance { class, .. } => write!(f, "{} instance", class.as_ref().borrow()),
         }
     }
 }
-
 
 pub struct Interpreter {
     environment: Option<Rc<RefCell<LocalEnvironment>>>,
@@ -196,16 +199,16 @@ pub struct Interpreter {
     pub locals: HashMap<usize, Binding>
 }
 
-impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
+impl ExprVisitor<InterpreterResult<Rc<RefCell<Value>>>> for Interpreter {
     #[inline(always)]
-    fn visit_expr(&mut self, expr: &Expr) -> InterpreterResult<Value> {
+    fn visit_expr(&mut self, expr: &Expr) -> InterpreterResult<Rc<RefCell<Value>>> {
         match expr {
             Expr::Binary { values, operator } => self.visit_binary_expr(&values.0, operator, &values.1),
             Expr::Literal(literal) => match literal {
-                Literal::Number(num) => Ok(Value::Number(*num)),
-                Literal::String(string) => Ok(Value::String(string.to_string())),
-                Literal::Bool(bool) => Ok(Value::Bool(*bool)),
-                Literal::Nil => Ok(Value::Nil),
+                Literal::Number(num) => Ok(Rc::new(RefCell::new(Value::Number(*num)))),
+                Literal::String(string) => Ok(Rc::new(RefCell::new(Value::String(string.to_string())))),
+                Literal::Bool(bool) => Ok(Rc::new(RefCell::new(Value::Bool(*bool)))),
+                Literal::Nil => Ok(Rc::new(RefCell::new(Value::Nil))),
             },
             Expr::Unary { operator, right } => self.visit_unary_expr(operator, right),
             Expr::Ternary { exprs } => self.visit_ternary_expr(&exprs.0, &exprs.1, &exprs.2),
@@ -215,6 +218,7 @@ impl ExprVisitor<InterpreterResult<Value>> for Interpreter {
             Expr::Call { line, exprs } => self.visit_call_expr(line, &exprs[0], &exprs[1..]),
             Expr::Lambda { params, body } => self.visit_lambda_expr(params, body),
             Expr::Get { name, object, line } => self.visit_get_expr(name, object, *line),
+            Expr::Set { name, object, value, line } => self.visit_set_expr(name, object, value, *line),
         }
     }
 }
@@ -257,7 +261,7 @@ impl Interpreter {
     }
 
     #[inline(always)]
-    fn visit_assign_expr(&mut self, name: &str, expr: &Expr, line: &usize, offset: &usize) -> InterpreterResult<Value> {
+    fn visit_assign_expr(&mut self, name: &str, expr: &Expr, line: &usize, offset: &usize) -> InterpreterResult<Rc<RefCell<Value>>> {
         let value = self.visit_expr(expr)?;
 
         let status = match self.locals.get(offset) {
@@ -281,14 +285,14 @@ impl Interpreter {
     }
 
     #[inline(always)]
-    fn visit_logical_expr(&mut self, left: &Expr, operator: &BinaryOp, right: &Expr) -> InterpreterResult<Value> {
+    fn visit_logical_expr(&mut self, left: &Expr, operator: &BinaryOp, right: &Expr) -> InterpreterResult<Rc<RefCell<Value>>> {
         let left = self.visit_expr(left)?;
 
         if operator.kind == BinaryOpKind::Or {
-            if Self::is_truthy(&left) {
+            if Self::is_truthy(&left.as_ref().borrow()) {
                 return Ok(left);
             }
-        } else if !Self::is_truthy(&left) {
+        } else if !Self::is_truthy(&left.as_ref().borrow()) {
             return Ok(left)
         }
 
@@ -296,14 +300,14 @@ impl Interpreter {
     }
 
     #[inline(always)]
-    fn visit_call_expr(&mut self, line: &usize, callee: &Expr, arguments: &[Expr]) -> InterpreterResult<Value> {
+    fn visit_call_expr(&mut self, line: &usize, callee: &Expr, arguments: &[Expr]) -> InterpreterResult<Rc<RefCell<Value>>> {
         let callee = self.visit_expr(callee)?;
 
         let arguments = arguments.into_iter()
             .map(|arg| self.visit_expr(arg))
             .collect::<InterpreterResult<Vec<_>>>()?;
 
-        let arity = callee.arity(line)?;
+        let arity = callee.as_ref().borrow().arity(line)?;
         if arguments.len() != arity.into() {
             return Err(InterpreterError {
                 msg: arity.to_string(),
@@ -312,22 +316,23 @@ impl Interpreter {
             })
         }
 
-        callee.call(line, self, arguments)
+        let x = callee.as_ref().borrow().call(line, self, arguments);
+        x
     }
 
     #[inline(always)]
-    fn visit_lambda_expr(&mut self, params: &[(String, usize)], body: &[Stmt]) -> InterpreterResult<Value> {
-        Ok(Value::Function {
+    fn visit_lambda_expr(&mut self, params: &[(String, usize)], body: &[Stmt]) -> InterpreterResult<Rc<RefCell<Value>>> {
+        Ok(Rc::new(RefCell::new(Value::Function {
             params: params.into_iter().map(|x| x.1).collect(),
             body: body.to_vec(),
             closure: self.environment.clone()
-        })
+        })))
     }
 
     #[inline(always)]
-    fn visit_get_expr(&mut self, name: &str, object: &Expr, line: usize) -> InterpreterResult<Value> {
+    fn visit_get_expr(&mut self, name: &str, object: &Expr, line: usize) -> InterpreterResult<Rc<RefCell<Value>>> {
         let object = self.visit_expr(object)?;
-        match object {
+        match &*object.clone().as_ref().borrow() {
             Value::Instance { fields, ..} => match fields.get(name) {
                 Some(val) => Ok(val.clone()),
                 None => Err(InterpreterError {
@@ -339,79 +344,101 @@ impl Interpreter {
             _ => Err(InterpreterError {
                 msg: name.to_owned(),
                 line,
-                kind: ErrorKind::GetOnNonInstance(object),
+                kind: ErrorKind::PropertyOnNonInstance(object),
             })
         }
     }
 
     #[inline(always)]
-    fn visit_unary_expr(&mut self, operator: &UnaryOp, right: &Expr) -> InterpreterResult<Value> {
-        let right = self.visit_expr(right)?;
-        
-        match operator.kind {
-            UnaryOpKind::Neg => {
-                match right {
-                    Value::Number(num) => Ok(Value::Number(-num)),
-                    v => Self::invalid_operand(&v, "number", operator.line)
-                }
+    fn visit_set_expr(&mut self, name: &str, object: &Expr, value: &Expr, line: usize) -> InterpreterResult<Rc<RefCell<Value>>> {
+        let object_rc = self.visit_expr(object)?;
+        let mut object = object_rc.borrow_mut();
+
+        match &mut *object {
+            Value::Instance { fields, .. } => {
+                let value = self.visit_expr(value)?;
+                fields.insert(name.to_owned(), value);
+                Ok(object_rc.clone())
             },
-            UnaryOpKind::Not => Ok(Value::Bool(!Self::is_truthy(&right))),
+            _ => Err(InterpreterError{
+                msg: name.to_owned(),
+                line,
+                kind: ErrorKind::PropertyOnNonInstance(object_rc.clone()),
+            })
         }
     }
 
     #[inline(always)]
-    fn visit_binary_expr(&mut self, left: &Expr, operator: &BinaryOp, right: &Expr) -> InterpreterResult<Value> {
-        let (left, right) = (self.visit_expr(left)?, self.visit_expr(right)?);
+    fn visit_unary_expr(&mut self, operator: &UnaryOp, right: &Expr) -> InterpreterResult<Rc<RefCell<Value>>> {
+        let right = self.visit_expr(right)?;
+        let right = &*right.as_ref().borrow();
+        
+        match operator.kind {
+            UnaryOpKind::Neg => {
+                match right {
+                    Value::Number(num) => Ok(Rc::new(RefCell::new(Value::Number(-num)))),
+                    v => Self::invalid_operand(&v, "number", operator.line)
+                }
+            },
+            UnaryOpKind::Not => Ok(Rc::new(RefCell::new(Value::Bool(!Self::is_truthy(&right))))),
+        }
+    }
+
+    #[inline(always)]
+    fn visit_binary_expr(&mut self, left: &Expr, operator: &BinaryOp, right: &Expr) -> InterpreterResult<Rc<RefCell<Value>>> {
+        let left_rc = self.visit_expr(left)?;
+        let right_rc = self.visit_expr(right)?;
+        let (left, right) = (&*left_rc.as_ref().borrow(), &*right_rc.as_ref().borrow());
 
         match operator.kind {
             BinaryOpKind::Add => match (&left, &right) {
-                (Value::Number(left), Value::Number(right)) => Ok(Value::Number(left + right)),
-                (Value::String(_), _) | (_, Value::String(_)) => Ok(Value::String(format!("{}{}", left, right))),
+                (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Number(left + right)))),
+                (Value::String(_), _) | (_, Value::String(_)) => Ok(Rc::new(RefCell::new(Value::String(format!("{}{}", left, right))))),
                 (Value::Number(_), v) => Self::invalid_operand(&v, "number or string", operator.line),
                 (Value::Bool(_), v) | (Value::Nil, v) => Self::invalid_operand(&v, "string", operator.line),
                 (v, _) => Self::invalid_operand(&v, "number or string", operator.line)
             },
             BinaryOpKind::Sub => match (left, right) {
-                (Value::Number(left), Value::Number(right)) => Ok(Value::Number(left - right)),
+                (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Number(left - right)))),
                 (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
                 (v, _) => Self::invalid_operand(&v, "number", operator.line)
             },
             BinaryOpKind::Mul => match (left, right) {
-                (Value::Number(left), Value::Number(right)) => Ok(Value::Number(left * right)),
+                (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Number(left * right)))),
                 (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
                 (v, _) => Self::invalid_operand(&v, "number", operator.line)
             },
             BinaryOpKind::Div => match (left, right) {
-                (Value::Number(_), Value::Number(right)) if right == 0.0 => Err(
+                (Value::Number(_), Value::Number(right)) if *right == 0.0 => Err(
                     InterpreterError{
                         msg: String::new(),
                         line: operator.line,
                         kind: ErrorKind::DivisionByZero,
                     }
                 ),
-                (Value::Number(left), Value::Number(right)) => Ok(Value::Number(left / right)),
+                (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Number(left / right)))),
                 (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
                 (v, _) => Self::invalid_operand(&v, "number", operator.line)
             },
-            BinaryOpKind::Eq => Ok(Value::Bool(Self::is_equal(&left, &right))),
-            BinaryOpKind::Ne => Ok(Value::Bool(!Self::is_equal(&left, &right))),
+            BinaryOpKind::Eq => Ok(Rc::new(RefCell::new(Value::Bool(Self::is_equal(&left, &right))))),
+            BinaryOpKind::Ne => Ok(Rc::new(RefCell::new(Value::Bool(!Self::is_equal(&left, &right))))),
             BinaryOpKind::Lt => match (left, right) {
-                (Value::Number(left), Value::Number(right)) => Ok(Value::Bool(left < right)),
+                (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Bool(left < right)))),
                 (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
                 (v, _) => Self::invalid_operand(&v, "number", operator.line)
             },
             BinaryOpKind::Le => match (left, right) {
-                (Value::Number(left), Value::Number(right)) => Ok(Value::Bool(left <= right)),
+                (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Bool(left <= right)))),
                 (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
                 (v, _) => Self::invalid_operand(&v, "number", operator.line)
             },
             BinaryOpKind::Gt => match (left, right) {
-                (Value::Number(left), Value::Number(right)) => Ok(Value::Bool(left > right)),
+                (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Bool(left > right)))),
                 (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
                 (v, _) => Self::invalid_operand(&v, "number", operator.line)
             },
             BinaryOpKind::Ge => match (left, right) {
-                (Value::Number(left), Value::Number(right)) => Ok(Value::Bool(left >= right)),
+                (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Bool(left >= right)))),
                 (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
                 (v, _) => Self::invalid_operand(&v, "number", operator.line)
             },
@@ -420,18 +447,20 @@ impl Interpreter {
     }
 
     #[inline(always)]
-    fn visit_ternary_expr(&mut self, condition: &Expr, then_branch: &Expr, else_branch: &Expr) -> InterpreterResult<Value> {
+    fn visit_ternary_expr(&mut self, condition: &Expr, then_branch: &Expr, else_branch: &Expr) -> InterpreterResult<Rc<RefCell<Value>>> {
         let result = self.visit_expr(condition)?;
-        self.visit_expr(match Self::is_truthy(&result) {
+        let res = self.visit_expr(match Self::is_truthy(&result.as_ref().borrow()) {
             true => then_branch,
             false => else_branch,
-        })
+        });
+        
+        res
     }
 
     #[inline(always)]
-    fn visit_var_expr(&mut self, name: &str, line: &usize, offset: &usize) -> InterpreterResult<Value> {
+    fn visit_var_expr(&mut self, name: &str, line: &usize, offset: &usize) -> InterpreterResult<Rc<RefCell<Value>>> {
         let value = match self.locals.get(offset) {
-            Some(binding) => self.environment.as_ref().unwrap().borrow().get_at(binding),
+            Some(binding) => self.environment.as_ref().unwrap().as_ref().borrow().get_at(binding),
             None => self.globals.get(name),
         };
 
@@ -459,7 +488,7 @@ impl Interpreter {
     #[inline(always)]
     fn visit_print_stmt(&mut self, expr: &Expr) -> InterpreterResult<()> {
         let value = self.visit_expr(expr)?;
-        println!("{}", value);
+        println!("{}", value.as_ref().borrow());
         Ok(())
     }
     
@@ -499,7 +528,7 @@ impl Interpreter {
 
     #[inline(always)]
     fn visit_if_stmt(&mut self, condition: &Expr, then_branch: &Stmt, else_branch: &Option<Box<Stmt>>) -> InterpreterResult<()> {
-        if Self::is_truthy(&self.visit_expr(condition)?) {
+        if Self::is_truthy(&self.visit_expr(condition)?.as_ref().borrow()) {
             self.visit_stmt(then_branch)
         } else if let Some(stmt) = &else_branch {
             self.visit_stmt(stmt)
@@ -514,7 +543,7 @@ impl Interpreter {
             Stmt::Block { statements } => {
                 self.create_new_env();
 
-                while Self::is_truthy(&self.visit_expr(condition)?) {
+                while Self::is_truthy(&self.visit_expr(condition)?.as_ref().borrow()) {
                     for stmt in statements {
                         let result = self.visit_stmt(stmt);
                         if result.is_err() {
@@ -529,7 +558,7 @@ impl Interpreter {
                 self.remove_new_env();
             },
             _ => {
-                while Self::is_truthy(&self.visit_expr(condition)?) {
+                while Self::is_truthy(&self.visit_expr(condition)?.as_ref().borrow()) {
                     self.visit_stmt(body)?
                 }
             }
@@ -548,11 +577,11 @@ impl Interpreter {
     }
 
     fn visit_function_stmt(&mut self, name: &str, params: &[(String, usize)], body: &[Stmt], offset: usize) -> InterpreterResult<()> {
-        let func = Some(Value::Function {
+        let func = Some(Rc::new(RefCell::new(Value::Function {
             params: params.into_iter().map(|x| x.1).collect(),
             body: body.to_vec(),
             closure: self.environment.clone()
-        });
+        })));
 
         match self.locals.get(&offset) {
             Some(binding) => self.environment
@@ -578,13 +607,13 @@ impl Interpreter {
                 if value != &Expr::Literal(Literal::Nil) {
                     self.visit_expr(value)?
                 } else {
-                    Value::Nil
+                    Rc::new(RefCell::new(Value::Nil))
                 }
             ),
         })
     }
 
-    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], offset: &usize) -> InterpreterResult<()> {
+    fn visit_class_stmt(&mut self, name: &str, _methods: &[Stmt], offset: &usize) -> InterpreterResult<()> {
         match self.locals.get(offset) {
             Some(binding) => self.environment
                 .as_ref()
@@ -592,9 +621,13 @@ impl Interpreter {
                 .borrow_mut()
                 .assign_at(
                     binding,
-                    Some(Value::Class(Class { name: name.to_owned() }))
+                    Some(Rc::new(RefCell::new(Value::Class(Rc::new(RefCell::new(Class { name: name.to_owned() }))))))
                 ),
-            None => self.globals.define(name, Some(Value::Class(Class { name: name.to_owned() })))
+            None => self.globals.define(name, Some(Rc::new(RefCell::new(
+                Value::Class(Rc::new(RefCell::new(
+                    Class { name: name.to_owned() }
+                )))
+            ))))
         };
 
         Ok(())
@@ -622,7 +655,7 @@ impl Interpreter {
         }
     }
 
-    fn invalid_operand(found: &Value, expected: &'static str, line: usize) -> InterpreterResult<Value> {
+    fn invalid_operand(found: &Value, expected: &'static str, line: usize) -> InterpreterResult<Rc<RefCell<Value>>> {
         let msg = match found {
             Value::Number(num) => format!("number: {}", num),
             Value::String(str) => format!("string: \"{}\"", str),
@@ -630,8 +663,8 @@ impl Interpreter {
             Value::Nil => String::from("nil"),
             Value::NativeFunction { .. } => "native_func".to_owned(),
             Value::Function { .. } => "func".to_owned(),
-            Value::Class(Class { name }) => format!("class {}", name),
-            Value::Instance { class, fields } => todo!(),
+            Value::Class(class) => format!("{}", class.as_ref().borrow()),
+            Value::Instance { class, .. } => format!("{} instance", class.as_ref().borrow()),
         };
         Err(
             InterpreterError {
