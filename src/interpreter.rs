@@ -115,7 +115,8 @@ pub enum Value {
 
 #[derive(Clone, Debug)]
 pub struct Class {
-    name: String
+    name: String,
+    methods: HashMap<String, Rc<RefCell<Value>>>
 }
 
 impl Display for Class {
@@ -333,13 +334,16 @@ impl Interpreter {
     fn visit_get_expr(&mut self, name: &str, object: &Expr, line: usize) -> InterpreterResult<Rc<RefCell<Value>>> {
         let object = self.visit_expr(object)?;
         match &*object.clone().as_ref().borrow() {
-            Value::Instance { fields, ..} => match fields.get(name) {
+            Value::Instance { fields, class } => match fields.get(name) {
                 Some(val) => Ok(val.clone()),
-                None => Err(InterpreterError {
-                    msg: name.to_owned(),
-                    line,
-                    kind: ErrorKind::UndefinedProperty,
-                }),
+                None => match class.borrow().methods.get(name) {
+                    Some(method) => Ok(method.clone()),
+                    None => Err(InterpreterError {
+                        msg: name.to_owned(),
+                        line,
+                        kind: ErrorKind::UndefinedProperty,
+                    }),
+                }
             },
             _ => Err(InterpreterError {
                 msg: name.to_owned(),
@@ -613,7 +617,36 @@ impl Interpreter {
         })
     }
 
-    fn visit_class_stmt(&mut self, name: &str, _methods: &[Stmt], offset: &usize) -> InterpreterResult<()> {
+    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], offset: &usize) -> InterpreterResult<()> {
+        let mut class = Class {
+            name: name.to_owned(),
+            methods: HashMap::with_capacity(methods.len())
+        };
+
+        for method in methods.into_iter() {
+            match method {
+                Stmt::Function { name, params, body, .. } => {
+                    class.methods.insert(
+                        name.to_owned(),
+                        Rc::new(RefCell::new(Value::Function{
+                            params: params.iter().map(|x| x.1).collect(),
+                            body: body.to_vec(),
+                            closure: self.environment.clone()
+                        }))
+                    );
+                },
+                _ => unreachable!()
+            }
+        }
+
+        let class = Some(
+            Rc::new(RefCell::new(
+                Value::Class(
+                    Rc::new(RefCell::new(class))
+                )
+            ))
+        );
+
         match self.locals.get(offset) {
             Some(binding) => self.environment
                 .as_ref()
@@ -621,13 +654,9 @@ impl Interpreter {
                 .borrow_mut()
                 .assign_at(
                     binding,
-                    Some(Rc::new(RefCell::new(Value::Class(Rc::new(RefCell::new(Class { name: name.to_owned() }))))))
+                    class
                 ),
-            None => self.globals.define(name, Some(Rc::new(RefCell::new(
-                Value::Class(Rc::new(RefCell::new(
-                    Class { name: name.to_owned() }
-                )))
-            ))))
+            None => self.globals.define(name, class)
         };
 
         Ok(())

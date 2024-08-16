@@ -48,7 +48,8 @@ pub type ResolverResult<T> = Result<T, ResolverError>;
 #[derive(PartialEq)]
 enum FunctionKind {
     None,
-    Function
+    Function,
+    Method
 }
 
 #[derive(Debug)]
@@ -109,7 +110,7 @@ impl StmtVisitor<ResolverResult<()>> for Resolver<'_> {
             Stmt::If { condition, then_branch, else_branch } => self.visit_if_stmt(condition, then_branch, else_branch),
             Stmt::While { condition, body } => self.visit_while_stmt(condition, body),
             Stmt::Break { .. } => Ok(()),
-            Stmt::Class { name, line, offset, .. } => self.visit_class_stmt(name, line, offset),
+            Stmt::Class { name, line, offset, methods } => self.visit_class_stmt(name, methods, line, offset),
         }
     }
 }
@@ -250,9 +251,17 @@ impl Resolver<'_> {
     }
 
     #[inline(always)]
-    fn visit_class_stmt(&mut self, name: &str, line: &usize, offset: &usize) -> ResolverResult<()> {
+    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], line: &usize, offset: &usize) -> ResolverResult<()> {
         self.declare(name, *line)?;
         self.define(name);
+
+        for method in methods {
+            match method {
+                Stmt::Function { params, body, line, .. } => self.resolve_function(params, body, *line, FunctionKind::Method),
+                _ => unreachable!()
+            }?;
+        }
+
         self.resolve_local(name, *offset);
         Ok(())
     }
