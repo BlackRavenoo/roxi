@@ -318,17 +318,18 @@ impl<'a> Parser<'a> {
         }
         self.advance();
 
-        let methods = if self.token.kind == TokenKind::RightBrace {
-            Vec::new()
-        } else {
-            let mut methods = Vec::with_capacity(4);
-            methods.push(self.fun_statement()?);
-            while !self.is_at_end() && self.token.kind != TokenKind::RightBrace {
+        let mut methods = Vec::with_capacity(4);
+        let mut static_methods = Vec::new();
+        
+
+        while !self.is_at_end() && self.token.kind != TokenKind::RightBrace {
+            if self.token.kind == TokenKind::Class {
+                self.advance();
+                static_methods.push(self.fun_statement()?);
+            } else {
                 methods.push(self.fun_statement()?);
             }
-
-            methods
-        };
+        }
 
         if self.token.kind != TokenKind::RightBrace {
             return Err(self.unexpected_token(format!("'{}'. Expected '}}'.", self.token.get_lexeme())))
@@ -339,6 +340,7 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Class {
             name,
             methods,
+            static_methods,
             line,
             offset
         })

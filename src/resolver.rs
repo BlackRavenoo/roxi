@@ -134,7 +134,7 @@ impl StmtVisitor<ResolverResult<()>> for Resolver<'_> {
             Stmt::If { condition, then_branch, else_branch } => self.visit_if_stmt(condition, then_branch, else_branch),
             Stmt::While { condition, body } => self.visit_while_stmt(condition, body),
             Stmt::Break { .. } => Ok(()),
-            Stmt::Class { name, line, offset, methods } => self.visit_class_stmt(name, methods, line, offset),
+            Stmt::Class { name, line, offset, methods, static_methods } => self.visit_class_stmt(name, methods, static_methods, line, offset),
         }
     }
 }
@@ -281,7 +281,7 @@ impl Resolver<'_> {
     }
 
     #[inline(always)]
-    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], line: &usize, offset: &usize) -> ResolverResult<()> {
+    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], static_methods: &[Stmt], line: &usize, offset: &usize) -> ResolverResult<()> {
         let enclosing_class = std::mem::replace(&mut self.current_class, ClassKind::Class);
 
         self.declare(name, *line)?;
@@ -305,6 +305,12 @@ impl Resolver<'_> {
                 },
                 _ => unreachable!()
             }?;
+        }
+
+        for static_method in static_methods {
+            if let Stmt::Function { params, body, line, .. } = static_method {
+                self.resolve_function(params, body, *line, FunctionKind::Function)?;
+            }
         }
         
         self.end_scope();

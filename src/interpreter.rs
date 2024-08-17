@@ -117,7 +117,8 @@ pub enum Value {
 #[derive(Clone, Debug)]
 pub struct Class {
     name: String,
-    methods: HashMap<String, Rc<RefCell<Value>>>
+    methods: HashMap<String, Rc<RefCell<Value>>>,
+    static_methods: HashMap<String, Rc<RefCell<Value>>>
 }
 
 impl Display for Class {
@@ -287,7 +288,7 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
             Stmt::Break { line } => self.visit_break_stmt(line),
             Stmt::Function { name, params, body, offset, .. } => self.visit_function_stmt(name, params, body, *offset),
             Stmt::Return { line, value } => self.visit_return_stmt(line, value),
-            Stmt::Class { name, methods, offset, .. } => self.visit_class_stmt(name, methods, offset),
+            Stmt::Class { name, methods, offset, static_methods, .. } => self.visit_class_stmt(name, methods, static_methods, offset),
         }
     }
 }
@@ -408,6 +409,16 @@ impl Interpreter {
                     }),
                 }
             },
+            Value::Class(class) => {
+                match class.borrow().static_methods.get(name) {
+                    Some(method) => Ok(method.clone()),
+                    None => Err(InterpreterError {
+                        msg: name.to_owned(),
+                        line,
+                        kind: ErrorKind::UndefinedProperty,
+                    }),
+                }
+            }
             _ => Err(InterpreterError {
                 msg: name.to_owned(),
                 line,
@@ -702,26 +713,38 @@ impl Interpreter {
         })
     }
 
-    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], offset: &usize) -> InterpreterResult<()> {
+    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], static_methods: &[Stmt], offset: &usize) -> InterpreterResult<()> {
         let mut class = Class {
             name: name.to_owned(),
-            methods: HashMap::with_capacity(methods.len())
+            methods: HashMap::with_capacity(methods.len()),
+            static_methods: HashMap::with_capacity(static_methods.len())
         };
 
         for method in methods.into_iter() {
-            match method {
-                Stmt::Function { name, params, body, .. } => {
-                    class.methods.insert(
-                        name.to_owned(),
-                        Rc::new(RefCell::new(Value::Function{
-                            params: params.iter().map(|x| x.1).collect(),
-                            body: body.to_vec(),
-                            closure: self.environment.clone(),
-                            is_initializer: name == "init"
-                        }))
-                    );
-                },
-                _ => unreachable!()
+            if let Stmt::Function { name, params, body, .. } = method {
+                class.methods.insert(
+                    name.to_owned(),
+                    Rc::new(RefCell::new(Value::Function{
+                        params: params.iter().map(|x| x.1).collect(),
+                        body: body.to_vec(),
+                        closure: self.environment.clone(),
+                        is_initializer: name == "init"
+                    }))
+                );
+            }
+        }
+
+        for static_method in static_methods {
+            if let Stmt::Function { name, params, body, .. } = static_method {
+                class.static_methods.insert(
+                    name.to_owned(),
+                    Rc::new(RefCell::new(Value::Function{
+                        params: params.iter().map(|x| x.1).collect(),
+                        body: body.to_vec(),
+                        closure: self.environment.clone(),
+                        is_initializer: false
+                    }))
+                );
             }
         }
 

@@ -24,6 +24,7 @@ pub enum Stmt {
     Class {
         name: String,
         methods: Vec<Stmt>,
+        static_methods: Vec<Stmt>,
         line: usize,
         offset: usize
     },
