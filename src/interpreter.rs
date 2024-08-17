@@ -103,7 +103,8 @@ pub enum Value {
     Function {
         params: Vec<usize>,
         body: Vec<Stmt>,
-        closure: Option<Rc<RefCell<LocalEnvironment>>>
+        closure: Option<Rc<RefCell<LocalEnvironment>>>,
+        is_initializer: bool
     },
     Class(Rc<RefCell<Class>>),
     Instance {
@@ -130,7 +131,11 @@ impl Value {
         match self {
             Value::NativeFunction { arity,.. } => Ok(*arity),
             Value::Function { params, .. } => Ok(params.len() as u16),
-            Value::Class { .. } => Ok(0),
+            Value::Class(class) => if let Some(initializer) = class.as_ref().borrow().methods.get("init") {
+                initializer.as_ref().borrow().arity(line)
+            } else {
+                Ok(0)
+            },
             _ => Err(InterpreterError {
                 msg: String::new(),
                 line: *line,
@@ -142,7 +147,7 @@ impl Value {
     pub fn call(&self, line: &usize, interpreter: &mut Interpreter, args: Vec<Rc<RefCell<Value>>>) -> InterpreterResult<Rc<RefCell<Value>>> {
         match self {
             Value::NativeFunction { fun, .. } => Ok(Rc::new(RefCell::new(fun(interpreter, args)))),
-            Value::Function { params, body, closure } => {
+            Value::Function { params, body, closure, is_initializer } => {
                 let mut env = Some(Rc::new(RefCell::new(LocalEnvironment::new(closure.clone()))));
                 std::mem::swap(&mut interpreter.environment, &mut env);
 
@@ -165,11 +170,55 @@ impl Value {
                     }
                 };
 
+                
+                let res = if *is_initializer {
+                    Ok(interpreter.environment
+                        .as_mut()
+                        .unwrap()
+                        .borrow_mut()
+                        .get_at(
+                            &Binding { scopes_up: 1, index: 0 }
+                        )
+                        .unwrap()
+                        .unwrap()
+                    )
+                } else {
+                    res
+                };
+
                 interpreter.environment = env;
 
                 res
             },
-            Value::Class(class) => Ok(Rc::new(RefCell::new(Value::Instance {class: Rc::clone(class), fields: HashMap::new()}))),
+            Value::Class(class) => {
+                let instance = Rc::new(RefCell::new(
+                    Value::Instance {
+                        class: Rc::clone(class),
+                        fields: HashMap::new()
+                    }
+                ));
+
+                if let Some(initializer) = class.as_ref().borrow().methods.get("init") {
+                    if let Value::Function {
+                        closure,
+                        params,
+                        body,
+                        is_initializer 
+                    } = &*initializer.as_ref().borrow() {
+                        let mut closure = LocalEnvironment::new(closure.clone());
+                        closure.assign(&Binding { scopes_up: 0, index: 0 }, Some(instance.clone()));
+                        let func = Value::Function {
+                            params: params.to_vec(),
+                            body: body.to_vec(),
+                            closure: Some(Rc::new(RefCell::new(closure))),
+                            is_initializer: *is_initializer
+                        };
+                        func.call(line, interpreter, args)?;
+                    }
+                }
+
+                Ok(instance)
+            },
             _ => Err(InterpreterError {
                 msg: String::new(),
                 line: *line,
@@ -327,7 +376,8 @@ impl Interpreter {
         Ok(Rc::new(RefCell::new(Value::Function {
             params: params.into_iter().map(|x| x.1).collect(),
             body: body.to_vec(),
-            closure: self.environment.clone()
+            closure: self.environment.clone(),
+            is_initializer: false
         })))
     }
 
@@ -337,15 +387,16 @@ impl Interpreter {
         match &*object.clone().as_ref().borrow() {
             Value::Instance { fields, class } => match fields.get(name) {
                 Some(val) => Ok(val.clone()),
-                None => match class.borrow().methods.get(name) {
-                    Some(method) => match &*method.borrow() {
-                        Value::Function { params, body, closure } => {
+                None => match class.as_ref().borrow().methods.get(name) {
+                    Some(method) => match &*method.as_ref().borrow() {
+                        Value::Function { params, body, closure, is_initializer } => {
                             let mut closure = LocalEnvironment::new(closure.clone());
                             closure.assign(&Binding { scopes_up: 0, index: 0 }, Some(object));
                             Ok(Rc::new(RefCell::new(Value::Function {
                                 params: params.to_vec(),
                                 body: body.to_vec(),
-                                closure: Some(Rc::new(RefCell::new(closure)))
+                                closure: Some(Rc::new(RefCell::new(closure))),
+                                is_initializer: *is_initializer
                             })))
                         },
                         _ => unreachable!(),
@@ -617,7 +668,8 @@ impl Interpreter {
         let func = Some(Rc::new(RefCell::new(Value::Function {
             params: params.into_iter().map(|x| x.1).collect(),
             body: body.to_vec(),
-            closure: self.environment.clone()
+            closure: self.environment.clone(),
+            is_initializer: false
         })));
 
         match self.locals.get(&offset) {
@@ -664,7 +716,8 @@ impl Interpreter {
                         Rc::new(RefCell::new(Value::Function{
                             params: params.iter().map(|x| x.1).collect(),
                             body: body.to_vec(),
-                            closure: self.environment.clone()
+                            closure: self.environment.clone(),
+                            is_initializer: name == "init"
                         }))
                     );
                 },

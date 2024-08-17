@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use wyhash2::WyHash;
 
-use crate::{expr::{Expr, ExprVisitor}, interpreter::Interpreter, stmt::{Stmt, StmtVisitor}};
+use crate::{expr::{Expr, ExprVisitor, Literal}, interpreter::Interpreter, stmt::{Stmt, StmtVisitor}};
 
 #[derive(Debug)]
 pub enum ResolverError {
@@ -18,6 +18,9 @@ pub enum ResolverError {
         line: usize
     },
     ThisOutsideClass {
+        line: usize
+    },
+    ReturnFromInitializer{
         line: usize
     }
 }
@@ -47,6 +50,11 @@ impl Display for ResolverError {
                 "[line {}] Error: `this` outside of a class.",
                 line
             ),
+            ResolverError::ReturnFromInitializer { line } => write!(
+                f,
+                "[line {}] Error: `return` from `init` function",
+                line
+            ),
         }
     }
 }
@@ -57,7 +65,8 @@ pub type ResolverResult<T> = Result<T, ResolverError>;
 enum FunctionKind {
     None,
     Function,
-    Method
+    Method,
+    Initializer
 }
 
 #[derive(PartialEq)]
@@ -214,8 +223,12 @@ impl Resolver<'_> {
 
     #[inline(always)]
     fn visit_return_stmt(&mut self, expr: &Expr, line: &usize) -> ResolverResult<()> {
-        if self.current_function == FunctionKind::None {
-            return Err(ResolverError::ReturnOutsideFunction { line: *line })
+        match self.current_function {
+            FunctionKind::None => return Err(ResolverError::ReturnFromInitializer { line: *line }),
+            FunctionKind::Initializer => if expr != &Expr::Literal(Literal::Nil) {
+                return Err(ResolverError::ReturnOutsideFunction { line: *line });
+            },
+            _ => ()
         }
         self.visit_expr(expr)
     }
@@ -282,7 +295,14 @@ impl Resolver<'_> {
 
         for method in methods {
             match method {
-                Stmt::Function { params, body, line, .. } => self.resolve_function(params, body, *line, FunctionKind::Method),
+                Stmt::Function { params, body, line, name, .. } => {
+                    let func_kind = if name != "init" {
+                        FunctionKind::Method
+                    } else {
+                        FunctionKind::Initializer
+                    };
+                    self.resolve_function(params, body, *line, func_kind)
+                },
                 _ => unreachable!()
             }?;
         }
