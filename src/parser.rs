@@ -301,6 +301,7 @@ impl<'a> Parser<'a> {
 
     }
 
+    #[inline(always)]
     fn class_statement(&mut self) -> ParserResult<Stmt> {
         let line = self.token.get_line();
         self.advance();
@@ -320,6 +321,7 @@ impl<'a> Parser<'a> {
 
         let mut methods = Vec::with_capacity(4);
         let mut static_methods = Vec::new();
+        let mut getters = Vec::new();
         
 
         while !self.is_at_end() && self.token.kind != TokenKind::RightBrace {
@@ -327,7 +329,30 @@ impl<'a> Parser<'a> {
                 self.advance();
                 static_methods.push(self.fun_statement()?);
             } else {
-                methods.push(self.fun_statement()?);
+                if self.token.kind != TokenKind::Identifier {
+                    return Err(self.unexpected_token(format!("'{}'. Expected function name.", self.token.get_lexeme())))
+                }
+                let name = self.token.get_lexeme().to_owned();
+                let line = self.token.get_line();
+                let offset = self.token.get_offset();
+                self.advance();
+
+                if self.token.kind == TokenKind::LeftParen {
+                    methods.push(self.fun(name, line, offset)?);
+                } else {
+                    if self.token.kind != TokenKind::LeftBrace {
+                        return Err(self.unexpected_token(format!("'{}'. Expected '{{'.", self.token.get_lexeme())))
+                    }
+                    let body = self.block()?;
+
+                    getters.push(Stmt::Function {
+                        name,
+                        params: Vec::new(),
+                        body,
+                        line,
+                        offset
+                    })
+                }
             }
         }
 
@@ -341,6 +366,7 @@ impl<'a> Parser<'a> {
             name,
             methods,
             static_methods,
+            getters,
             line,
             offset
         })
@@ -354,6 +380,10 @@ impl<'a> Parser<'a> {
         let line = self.token.get_line();
         let offset = self.token.get_offset();
         self.advance();
+        self.fun(name, line, offset)
+    }
+
+    fn fun(&mut self, name: String, line: usize, offset: usize) -> ParserResult<Stmt> {
         if self.token.kind != TokenKind::LeftParen {
             return Err(self.unexpected_token(format!("'{}'. Expected '('.", self.token.get_lexeme())))
         }

@@ -134,7 +134,7 @@ impl StmtVisitor<ResolverResult<()>> for Resolver<'_> {
             Stmt::If { condition, then_branch, else_branch } => self.visit_if_stmt(condition, then_branch, else_branch),
             Stmt::While { condition, body } => self.visit_while_stmt(condition, body),
             Stmt::Break { .. } => Ok(()),
-            Stmt::Class { name, line, offset, methods, static_methods } => self.visit_class_stmt(name, methods, static_methods, line, offset),
+            Stmt::Class { name, line, offset, methods, static_methods, getters, .. } => self.visit_class_stmt(name, methods, static_methods, getters, line, offset),
         }
     }
 }
@@ -224,9 +224,9 @@ impl Resolver<'_> {
     #[inline(always)]
     fn visit_return_stmt(&mut self, expr: &Expr, line: &usize) -> ResolverResult<()> {
         match self.current_function {
-            FunctionKind::None => return Err(ResolverError::ReturnFromInitializer { line: *line }),
+            FunctionKind::None => return Err(ResolverError::ReturnOutsideFunction { line: *line }),
             FunctionKind::Initializer => if expr != &Expr::Literal(Literal::Nil) {
-                return Err(ResolverError::ReturnOutsideFunction { line: *line });
+                return Err(ResolverError::ReturnFromInitializer { line: *line });
             },
             _ => ()
         }
@@ -281,7 +281,7 @@ impl Resolver<'_> {
     }
 
     #[inline(always)]
-    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], static_methods: &[Stmt], line: &usize, offset: &usize) -> ResolverResult<()> {
+    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], static_methods: &[Stmt], getters: &[Stmt], line: &usize, offset: &usize) -> ResolverResult<()> {
         let enclosing_class = std::mem::replace(&mut self.current_class, ClassKind::Class);
 
         self.declare(name, *line)?;
@@ -309,6 +309,12 @@ impl Resolver<'_> {
 
         for static_method in static_methods {
             if let Stmt::Function { params, body, line, .. } = static_method {
+                self.resolve_function(params, body, *line, FunctionKind::Function)?;
+            }
+        }
+
+        for getter in getters {
+            if let Stmt::Function { params, body, line, .. } = getter {
                 self.resolve_function(params, body, *line, FunctionKind::Function)?;
             }
         }

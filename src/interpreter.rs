@@ -118,7 +118,8 @@ pub enum Value {
 pub struct Class {
     name: String,
     methods: HashMap<String, Rc<RefCell<Value>>>,
-    static_methods: HashMap<String, Rc<RefCell<Value>>>
+    static_methods: HashMap<String, Rc<RefCell<Value>>>,
+    getters: HashMap<String, Rc<RefCell<Value>>>
 }
 
 impl Display for Class {
@@ -288,7 +289,7 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
             Stmt::Break { line } => self.visit_break_stmt(line),
             Stmt::Function { name, params, body, offset, .. } => self.visit_function_stmt(name, params, body, *offset),
             Stmt::Return { line, value } => self.visit_return_stmt(line, value),
-            Stmt::Class { name, methods, offset, static_methods, .. } => self.visit_class_stmt(name, methods, static_methods, offset),
+            Stmt::Class { name, methods, offset, static_methods, getters, .. } => self.visit_class_stmt(name, methods, static_methods, getters, offset),
         }
     }
 }
@@ -386,31 +387,54 @@ impl Interpreter {
     fn visit_get_expr(&mut self, name: &str, object: &Expr, line: usize) -> InterpreterResult<Rc<RefCell<Value>>> {
         let object = self.visit_expr(object)?;
         match &*object.clone().as_ref().borrow() {
-            Value::Instance { fields, class } => match fields.get(name) {
-                Some(val) => Ok(val.clone()),
-                None => match class.as_ref().borrow().methods.get(name) {
-                    Some(method) => match &*method.as_ref().borrow() {
-                        Value::Function { params, body, closure, is_initializer } => {
-                            let mut closure = LocalEnvironment::new(closure.clone());
-                            closure.assign(&Binding { scopes_up: 0, index: 0 }, Some(object));
-                            Ok(Rc::new(RefCell::new(Value::Function {
-                                params: params.to_vec(),
-                                body: body.to_vec(),
-                                closure: Some(Rc::new(RefCell::new(closure))),
-                                is_initializer: *is_initializer
-                            })))
-                        },
-                        _ => unreachable!(),
-                    },
-                    None => Err(InterpreterError {
-                        msg: name.to_owned(),
-                        line,
-                        kind: ErrorKind::UndefinedProperty,
-                    }),
+            Value::Instance { fields, class } => {
+                if let Some(val) = fields.get(name) {
+                    Ok(val.clone())
+                } else {
+                    if let Some(method) = class.as_ref().borrow().methods.get(name) {
+                        match &*method.as_ref().borrow() {
+                            Value::Function { params, body, closure, is_initializer } => {
+                                let mut closure = LocalEnvironment::new(closure.clone());
+                                closure.assign(&Binding { scopes_up: 0, index: 0 }, Some(object));
+                                Ok(Rc::new(RefCell::new(Value::Function {
+                                    params: params.to_vec(),
+                                    body: body.to_vec(),
+                                    closure: Some(Rc::new(RefCell::new(closure))),
+                                    is_initializer: *is_initializer
+                                })))
+                            },
+                            _ => unreachable!(),
+                        }
+                    } else if let Some(getter) = class.as_ref().borrow().getters.get(name) {
+                        match &*getter.as_ref().borrow() {
+                            Value::Function {
+                                params,
+                                body,
+                                closure,
+                                is_initializer
+                            } => {
+                                let mut closure = LocalEnvironment::new(closure.clone());
+                                closure.assign(&Binding { scopes_up: 0, index: 0 }, Some(object));
+                                Value::Function {
+                                    params: params.to_vec(),
+                                    body: body.to_vec(),
+                                    closure: Some(Rc::new(RefCell::new(closure))),
+                                    is_initializer: *is_initializer
+                                }.call(&line, self, Vec::new())
+                            },
+                            _ => unreachable!()
+                        } 
+                    } else {
+                        Err(InterpreterError {
+                            msg: name.to_owned(),
+                            line,
+                            kind: ErrorKind::UndefinedProperty,
+                        })
+                    }
                 }
-            },
+            }
             Value::Class(class) => {
-                match class.borrow().static_methods.get(name) {
+                match class.as_ref().borrow().static_methods.get(name) {
                     Some(method) => Ok(method.clone()),
                     None => Err(InterpreterError {
                         msg: name.to_owned(),
@@ -713,11 +737,12 @@ impl Interpreter {
         })
     }
 
-    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], static_methods: &[Stmt], offset: &usize) -> InterpreterResult<()> {
+    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], static_methods: &[Stmt], getters: &[Stmt], offset: &usize) -> InterpreterResult<()> {
         let mut class = Class {
             name: name.to_owned(),
             methods: HashMap::with_capacity(methods.len()),
-            static_methods: HashMap::with_capacity(static_methods.len())
+            static_methods: HashMap::with_capacity(static_methods.len()),
+            getters: HashMap::with_capacity(getters.len())
         };
 
         for method in methods.into_iter() {
@@ -737,6 +762,20 @@ impl Interpreter {
         for static_method in static_methods {
             if let Stmt::Function { name, params, body, .. } = static_method {
                 class.static_methods.insert(
+                    name.to_owned(),
+                    Rc::new(RefCell::new(Value::Function{
+                        params: params.iter().map(|x| x.1).collect(),
+                        body: body.to_vec(),
+                        closure: self.environment.clone(),
+                        is_initializer: false
+                    }))
+                );
+            }
+        }
+
+        for getter in getters {
+            if let Stmt::Function { name, params, body, .. } = getter {
+                class.getters.insert(
                     name.to_owned(),
                     Rc::new(RefCell::new(Value::Function{
                         params: params.iter().map(|x| x.1).collect(),
