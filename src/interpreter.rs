@@ -220,6 +220,7 @@ impl ExprVisitor<InterpreterResult<Rc<RefCell<Value>>>> for Interpreter {
             Expr::Lambda { params, body } => self.visit_lambda_expr(params, body),
             Expr::Get { name, object, line } => self.visit_get_expr(name, object, *line),
             Expr::Set { name, object, value, line } => self.visit_set_expr(name, object, value, *line),
+            Expr::This { line, offset } => self.visit_this_expr(*line, offset),
         }
     }
 }
@@ -337,7 +338,18 @@ impl Interpreter {
             Value::Instance { fields, class } => match fields.get(name) {
                 Some(val) => Ok(val.clone()),
                 None => match class.borrow().methods.get(name) {
-                    Some(method) => Ok(method.clone()),
+                    Some(method) => match &*method.borrow() {
+                        Value::Function { params, body, closure } => {
+                            let mut closure = LocalEnvironment::new(closure.clone());
+                            closure.assign(&Binding { scopes_up: 0, index: 0 }, Some(object));
+                            Ok(Rc::new(RefCell::new(Value::Function {
+                                params: params.to_vec(),
+                                body: body.to_vec(),
+                                closure: Some(Rc::new(RefCell::new(closure)))
+                            })))
+                        },
+                        _ => unreachable!(),
+                    },
                     None => Err(InterpreterError {
                         msg: name.to_owned(),
                         line,
@@ -369,6 +381,27 @@ impl Interpreter {
                 line,
                 kind: ErrorKind::PropertyOnNonInstance(object_rc.clone()),
             })
+        }
+    }
+    #[inline(always)]
+    fn visit_this_expr(&mut self, line: usize, offset: &usize) -> InterpreterResult<Rc<RefCell<Value>>> {
+        let value = match self.locals.get(offset) {
+            Some(binding) => self.environment.as_ref().unwrap().as_ref().borrow().get_at(binding),
+            None => unreachable!(),
+        };
+
+        match value {
+            Some(Some(value)) => Ok(value),
+            Some(None) => Err(InterpreterError{
+                msg: "this".to_owned(),
+                line,
+                kind: ErrorKind::UninitializedVariable,
+            }),
+            None => Err(InterpreterError{
+                msg: "this".to_owned(),
+                line,
+                kind: ErrorKind::UndefinedVariable,
+            }),
         }
     }
 

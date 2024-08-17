@@ -35,6 +35,10 @@ pub enum Expr {
         value: Box<Expr>,
         line: usize
     },
+    This {
+        line: usize,
+        offset: usize
+    },
     Literal(Literal),
     Unary {
         operator: UnaryOp,

@@ -781,6 +781,7 @@ impl<'a> Parser<'a> {
                 Ok(expr)
             }
             TokenKind::Identifier => Ok(Expr::Variable {name: self.token.get_lexeme().to_owned(), line: self.token.get_line(), offset: self.token.get_offset()}),
+            TokenKind::This => Ok(Expr::This { line: self.token.get_line(), offset: self.token.get_offset() }),
             _ => return Err(self.unexpected_token(format!("'{}'", self.token.get_lexeme())))
         };
         self.advance();

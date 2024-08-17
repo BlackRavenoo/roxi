@@ -16,6 +16,9 @@ pub enum ResolverError {
     },
     ReturnOutsideFunction {
         line: usize
+    },
+    ThisOutsideClass {
+        line: usize
     }
 }
 
@@ -38,7 +41,12 @@ impl Display for ResolverError {
                 f,
                 "[line {}] Error: `return` outside function.",
                 line
-            )
+            ),
+            ResolverError::ThisOutsideClass { line } => write!(
+                f,
+                "[line {}] Error: `this` outside of a class.",
+                line
+            ),
         }
     }
 }
@@ -50,6 +58,12 @@ enum FunctionKind {
     None,
     Function,
     Method
+}
+
+#[derive(PartialEq)]
+enum ClassKind {
+    None,
+    Class
 }
 
 #[derive(Debug)]
@@ -94,7 +108,8 @@ impl VariableData {
 pub struct Resolver<'a> {
     interpreter: &'a mut Interpreter,
     scopes: Vec<HashMap<String, VariableData, WyHash>>,
-    current_function: FunctionKind
+    current_function: FunctionKind,
+    current_class: ClassKind
 }
 
 impl StmtVisitor<ResolverResult<()>> for Resolver<'_> {
@@ -130,6 +145,7 @@ impl ExprVisitor<ResolverResult<()>> for Resolver<'_> {
             Expr::Lambda { params, body } => self.resolve_function(params, body, 0, FunctionKind::Function),
             Expr::Get { object, .. } => self.visit_expr(object),
             Expr::Set { object, value, ..} => { self.visit_expr(object)?; self.visit_expr(value) },
+            Expr::This { offset, line } => self.visit_this_expr(*offset, *line),
         }
     }
 }
@@ -140,7 +156,8 @@ impl Resolver<'_> {
         Resolver {
             interpreter,
             scopes: Vec::with_capacity(2),
-            current_function: FunctionKind::None
+            current_function: FunctionKind::None,
+            current_class: ClassKind::None
         }
     }
 
@@ -252,8 +269,16 @@ impl Resolver<'_> {
 
     #[inline(always)]
     fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], line: &usize, offset: &usize) -> ResolverResult<()> {
+        let enclosing_class = std::mem::replace(&mut self.current_class, ClassKind::Class);
+
         self.declare(name, *line)?;
         self.define(name);
+
+        self.begin_scope();
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert("this".to_string(), VariableData::new(VariableState::Used, scope.len()));
+        }
+        self.resolve_local("this", *offset + 1);
 
         for method in methods {
             match method {
@@ -261,8 +286,13 @@ impl Resolver<'_> {
                 _ => unreachable!()
             }?;
         }
-
+        
+        self.end_scope();
+        
         self.resolve_local(name, *offset);
+
+        self.current_class = enclosing_class;
+
         Ok(())
     }
 
@@ -314,6 +344,17 @@ impl Resolver<'_> {
     fn visit_logical_expr(&mut self, left: &Expr, right: &Expr) -> ResolverResult<()> {
         self.visit_expr(left)?;
         self.visit_expr(right)
+    }
+
+    #[inline(always)]
+    fn visit_this_expr(&mut self, offset: usize, line: usize) -> ResolverResult<()> {
+        if self.current_class != ClassKind::Class {
+            return Err(ResolverError::ThisOutsideClass {
+                line
+            })
+        }
+        self.resolve_local("this", offset);
+        Ok(())
     }
 
     #[inline(always)]
