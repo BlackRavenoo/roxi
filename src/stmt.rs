@@ -23,6 +23,7 @@ pub enum Stmt {
     },
     Class {
         name: String,
+        superclass: Option<Expr>,
         methods: Vec<Stmt>,
         static_methods: Vec<Stmt>,
         getters: Vec<Stmt>,

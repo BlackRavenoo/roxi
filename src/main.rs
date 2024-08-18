@@ -95,7 +95,7 @@ fn main() {
             while !parser.is_at_end() {
                 match parser.parse() {
                     Ok(stmt) => stmts.push(stmt),
-                    Err(_) => exit_code = 65,
+                    Err(_) => std::process::exit(65),
                 }
             }
 

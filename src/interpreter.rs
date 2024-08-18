@@ -11,6 +11,7 @@ enum ErrorKind {
     NotCallable,
     PropertyOnNonInstance(Rc<RefCell<Value>>),
     UndefinedProperty,
+    SuperclassIsNotClass,
     WrongArity(usize),
     Return(Rc<RefCell<Value>>),
     Break
@@ -85,6 +86,11 @@ impl Display for InterpreterError {
                 self.line,
                 self.msg
             ),
+            ErrorKind::SuperclassIsNotClass => write!(
+                f,
+                "[line {}] Error: Superclass is not a class.",
+                self.line
+            ),
         }
     }
 }
@@ -117,9 +123,39 @@ pub enum Value {
 #[derive(Clone, Debug)]
 pub struct Class {
     name: String,
+    superclass: Option<Rc<RefCell<Class>>>,
     methods: HashMap<String, Rc<RefCell<Value>>>,
     static_methods: HashMap<String, Rc<RefCell<Value>>>,
     getters: HashMap<String, Rc<RefCell<Value>>>
+}
+
+impl Class {
+    fn find_method(&self, name: &str) -> Option<Rc<RefCell<Value>>> {
+        self.methods.get(name).cloned()
+            .or_else(|| {
+                self.superclass
+                    .as_ref()
+                    .and_then(|superclass| superclass.as_ref().borrow().find_method(name))
+            })
+    }
+
+    fn find_static_method(&self, name: &str) -> Option<Rc<RefCell<Value>>> {
+        self.static_methods.get(name).cloned()
+            .or_else(|| {
+                self.superclass
+                    .as_ref()
+                    .and_then(|superclass| superclass.as_ref().borrow().find_static_method(name))
+            })
+    }
+
+    fn find_getter(&self, name: &str) -> Option<Rc<RefCell<Value>>> {
+        self.getters.get(name).cloned()
+            .or_else(|| {
+                self.superclass
+                    .as_ref()
+                    .and_then(|superclass| superclass.as_ref().borrow().find_getter(name))
+            })
+    }
 }
 
 impl Display for Class {
@@ -133,7 +169,7 @@ impl Value {
         match self {
             Value::NativeFunction { arity,.. } => Ok(*arity),
             Value::Function { params, .. } => Ok(params.len() as u16),
-            Value::Class(class) => if let Some(initializer) = class.as_ref().borrow().methods.get("init") {
+            Value::Class(class) => if let Some(initializer) = class.as_ref().borrow().find_method("init") {
                 initializer.as_ref().borrow().arity(line)
             } else {
                 Ok(0)
@@ -200,7 +236,7 @@ impl Value {
                     }
                 ));
 
-                if let Some(initializer) = class.as_ref().borrow().methods.get("init") {
+                if let Some(initializer) = class.as_ref().borrow().find_method("init") {
                     if let Value::Function {
                         closure,
                         params,
@@ -289,7 +325,7 @@ impl StmtVisitor<InterpreterResult<()>> for Interpreter {
             Stmt::Break { line } => self.visit_break_stmt(line),
             Stmt::Function { name, params, body, offset, .. } => self.visit_function_stmt(name, params, body, *offset),
             Stmt::Return { line, value } => self.visit_return_stmt(line, value),
-            Stmt::Class { name, methods, offset, static_methods, getters, .. } => self.visit_class_stmt(name, methods, static_methods, getters, offset),
+            Stmt::Class { name, superclass, methods, offset, static_methods, getters, .. } => self.visit_class_stmt(name, superclass, methods, static_methods, getters, offset),
         }
     }
 }
@@ -391,7 +427,7 @@ impl Interpreter {
                 if let Some(val) = fields.get(name) {
                     Ok(val.clone())
                 } else {
-                    if let Some(method) = class.as_ref().borrow().methods.get(name) {
+                    if let Some(method) = class.as_ref().borrow().find_method(name) {
                         match &*method.as_ref().borrow() {
                             Value::Function { params, body, closure, is_initializer } => {
                                 let mut closure = LocalEnvironment::new(closure.clone());
@@ -405,7 +441,7 @@ impl Interpreter {
                             },
                             _ => unreachable!(),
                         }
-                    } else if let Some(getter) = class.as_ref().borrow().getters.get(name) {
+                    } else if let Some(getter) = class.as_ref().borrow().find_getter(name) {
                         match &*getter.as_ref().borrow() {
                             Value::Function {
                                 params,
@@ -434,7 +470,7 @@ impl Interpreter {
                 }
             }
             Value::Class(class) => {
-                match class.as_ref().borrow().static_methods.get(name) {
+                match class.as_ref().borrow().find_static_method(name) {
                     Some(method) => Ok(method.clone()),
                     None => Err(InterpreterError {
                         msg: name.to_owned(),
@@ -737,9 +773,33 @@ impl Interpreter {
         })
     }
 
-    fn visit_class_stmt(&mut self, name: &str, methods: &[Stmt], static_methods: &[Stmt], getters: &[Stmt], offset: &usize) -> InterpreterResult<()> {
+    fn visit_class_stmt(&mut self, name: &str, superclass: &Option<Expr>, methods: &[Stmt], static_methods: &[Stmt], getters: &[Stmt], offset: &usize) -> InterpreterResult<()> {
+        let superclass = if let Some(superclass) = superclass {
+            let value_rc = self.visit_expr(superclass)?;
+            let value = &*value_rc.as_ref().borrow();
+            let class = match value {
+                Value::Class(class) => class,
+                _ => {
+                    let line = match superclass {
+                        Expr::Variable { line, .. } => *line,
+                        _ => unreachable!()
+                    };
+
+                    return Err(InterpreterError{
+                        msg: String::new(),
+                        line,
+                        kind: ErrorKind::SuperclassIsNotClass,
+                    })
+                }
+            };
+            Some(class.clone())
+        } else {
+            None
+        };
+        
         let mut class = Class {
             name: name.to_owned(),
+            superclass,
             methods: HashMap::with_capacity(methods.len()),
             static_methods: HashMap::with_capacity(static_methods.len()),
             getters: HashMap::with_capacity(getters.len())

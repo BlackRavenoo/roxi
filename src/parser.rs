@@ -312,8 +312,25 @@ impl<'a> Parser<'a> {
 
         let name = self.token.get_lexeme().to_owned();
         let offset = self.token.get_offset();
-
         self.advance();
+
+        let superclass = if self.token.kind == TokenKind::Less {
+            self.advance();
+            if self.token.kind != TokenKind::Identifier {
+                return Err(self.unexpected_token(format!("'{}'. Expected superclass name.", self.token.get_lexeme())))
+            }
+            let var = Some(Expr::Variable {
+                name: self.token.get_lexeme().to_owned(),
+                line: self.token.get_line(),
+                offset: self.token.get_offset()
+            });
+            self.advance();
+            var
+        } else {
+            None
+        };
+
+        
         if self.token.kind != TokenKind::LeftBrace {
             return Err(self.unexpected_token(format!("'{}'. Expected '{{'.", self.token.get_lexeme())))
         }
@@ -364,6 +381,7 @@ impl<'a> Parser<'a> {
 
         Ok(Stmt::Class {
             name,
+            superclass,
             methods,
             static_methods,
             getters,
