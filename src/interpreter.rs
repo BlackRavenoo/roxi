@@ -78,7 +78,7 @@ impl Display for InterpreterError {
                 "[line {}] Error: Tried to access field `{}` on {}.",
                 self.line,
                 self.msg,
-                val.as_ref().borrow()
+                val.borrow()
             ),
             ErrorKind::UndefinedProperty => write!(
                 f,
@@ -135,7 +135,7 @@ impl Class {
             .or_else(|| {
                 self.superclass
                     .as_ref()
-                    .and_then(|superclass| superclass.as_ref().borrow().find_method(name))
+                    .and_then(|superclass| superclass.borrow().find_method(name))
             })
     }
 
@@ -144,7 +144,7 @@ impl Class {
             .or_else(|| {
                 self.superclass
                     .as_ref()
-                    .and_then(|superclass| superclass.as_ref().borrow().find_static_method(name))
+                    .and_then(|superclass| superclass.borrow().find_static_method(name))
             })
     }
 
@@ -153,7 +153,7 @@ impl Class {
             .or_else(|| {
                 self.superclass
                     .as_ref()
-                    .and_then(|superclass| superclass.as_ref().borrow().find_getter(name))
+                    .and_then(|superclass| superclass.borrow().find_getter(name))
             })
     }
 }
@@ -169,8 +169,8 @@ impl Value {
         match self {
             Value::NativeFunction { arity,.. } => Ok(*arity),
             Value::Function { params, .. } => Ok(params.len() as u16),
-            Value::Class(class) => if let Some(initializer) = class.as_ref().borrow().find_method("init") {
-                initializer.as_ref().borrow().arity(line)
+            Value::Class(class) => if let Some(initializer) = class.borrow().find_method("init") {
+                initializer.borrow().arity(line)
             } else {
                 Ok(0)
             },
@@ -236,15 +236,15 @@ impl Value {
                     }
                 ));
 
-                if let Some(initializer) = class.as_ref().borrow().find_method("init") {
+                if let Some(initializer) = class.borrow().find_method("init") {
                     if let Value::Function {
                         closure,
                         params,
                         body,
                         is_initializer 
-                    } = &*initializer.as_ref().borrow() {
+                    } = &*initializer.borrow() {
                         let mut closure = LocalEnvironment::new(closure.clone());
-                        closure.assign(&Binding { scopes_up: 0, index: 0 }, Some(instance.clone()));
+                        closure.assign(0, Some(instance.clone()));
                         let func = Value::Function {
                             params: params.to_vec(),
                             body: body.to_vec(),
@@ -275,8 +275,8 @@ impl Display for Value {
             Value::Nil => write!(f, "nil"),
             Value::NativeFunction { .. } => write!(f, "native_func"),
             Value::Function { ..  } => write!(f, "func"),
-            Value::Class(class) => write!(f, "{}", class.as_ref().borrow()),
-            Value::Instance { class, .. } => write!(f, "{} instance", class.as_ref().borrow()),
+            Value::Class(class) => write!(f, "{}", class.borrow()),
+            Value::Instance { class, .. } => write!(f, "{} instance", class.borrow()),
         }
     }
 }
@@ -308,6 +308,7 @@ impl ExprVisitor<InterpreterResult<Rc<RefCell<Value>>>> for Interpreter {
             Expr::Get { name, object, line } => self.visit_get_expr(name, object, *line),
             Expr::Set { name, object, value, line } => self.visit_set_expr(name, object, value, *line),
             Expr::This { line, offset } => self.visit_this_expr(*line, offset),
+            Expr::Super { method, offset, line } => self.visit_super_expr(method, offset, *line),
         }
     }
 }
@@ -378,10 +379,10 @@ impl Interpreter {
         let left = self.visit_expr(left)?;
 
         if operator.kind == BinaryOpKind::Or {
-            if Self::is_truthy(&left.as_ref().borrow()) {
+            if Self::is_truthy(&left.borrow()) {
                 return Ok(left);
             }
-        } else if !Self::is_truthy(&left.as_ref().borrow()) {
+        } else if !Self::is_truthy(&left.borrow()) {
             return Ok(left)
         }
 
@@ -396,7 +397,7 @@ impl Interpreter {
             .map(|arg| self.visit_expr(arg))
             .collect::<InterpreterResult<Vec<_>>>()?;
 
-        let arity = callee.as_ref().borrow().arity(line)?;
+        let arity = callee.borrow().arity(line)?;
         if arguments.len() != arity.into() {
             return Err(InterpreterError {
                 msg: arity.to_string(),
@@ -405,7 +406,7 @@ impl Interpreter {
             })
         }
 
-        let x = callee.as_ref().borrow().call(line, self, arguments);
+        let x = callee.borrow().call(line, self, arguments);
         x
     }
 
@@ -422,16 +423,16 @@ impl Interpreter {
     #[inline(always)]
     fn visit_get_expr(&mut self, name: &str, object: &Expr, line: usize) -> InterpreterResult<Rc<RefCell<Value>>> {
         let object = self.visit_expr(object)?;
-        match &*object.clone().as_ref().borrow() {
+        match &*object.clone().borrow() {
             Value::Instance { fields, class } => {
                 if let Some(val) = fields.get(name) {
                     Ok(val.clone())
                 } else {
-                    if let Some(method) = class.as_ref().borrow().find_method(name) {
-                        match &*method.as_ref().borrow() {
+                    if let Some(method) = class.borrow().find_method(name) {
+                        match &*method.borrow() {
                             Value::Function { params, body, closure, is_initializer } => {
                                 let mut closure = LocalEnvironment::new(closure.clone());
-                                closure.assign(&Binding { scopes_up: 0, index: 0 }, Some(object));
+                                closure.assign(0, Some(object));
                                 Ok(Rc::new(RefCell::new(Value::Function {
                                     params: params.to_vec(),
                                     body: body.to_vec(),
@@ -441,8 +442,8 @@ impl Interpreter {
                             },
                             _ => unreachable!(),
                         }
-                    } else if let Some(getter) = class.as_ref().borrow().find_getter(name) {
-                        match &*getter.as_ref().borrow() {
+                    } else if let Some(getter) = class.borrow().find_getter(name) {
+                        match &*getter.borrow() {
                             Value::Function {
                                 params,
                                 body,
@@ -450,7 +451,7 @@ impl Interpreter {
                                 is_initializer
                             } => {
                                 let mut closure = LocalEnvironment::new(closure.clone());
-                                closure.assign(&Binding { scopes_up: 0, index: 0 }, Some(object));
+                                closure.assign(0, Some(object));
                                 Value::Function {
                                     params: params.to_vec(),
                                     body: body.to_vec(),
@@ -470,7 +471,7 @@ impl Interpreter {
                 }
             }
             Value::Class(class) => {
-                match class.as_ref().borrow().find_static_method(name) {
+                match class.borrow().find_static_method(name) {
                     Some(method) => Ok(method.clone()),
                     None => Err(InterpreterError {
                         msg: name.to_owned(),
@@ -508,7 +509,7 @@ impl Interpreter {
     #[inline(always)]
     fn visit_this_expr(&mut self, line: usize, offset: &usize) -> InterpreterResult<Rc<RefCell<Value>>> {
         let value = match self.locals.get(offset) {
-            Some(binding) => self.environment.as_ref().unwrap().as_ref().borrow().get_at(binding),
+            Some(binding) => self.environment.as_ref().unwrap().borrow().get_at(binding),
             None => unreachable!(),
         };
 
@@ -528,9 +529,71 @@ impl Interpreter {
     }
 
     #[inline(always)]
+    fn visit_super_expr(&mut self, method: &str, offset: &usize, line: usize) -> InterpreterResult<Rc<RefCell<Value>>> {
+        let binding = &self.locals[offset];
+
+        let env = self.environment.as_ref().unwrap().borrow();
+        
+        let superclass = env
+            .get_at(binding)
+            .unwrap()
+            .unwrap();
+
+        let this = env
+            .get_at(&Binding { scopes_up: binding.scopes_up - 1, index: 0 })
+            .unwrap()
+            .unwrap();
+
+        drop(env);
+        
+        let method = match &*superclass.borrow() {
+            Value::Class (class) => match class.borrow().find_method(method) {
+                Some(method) => match &*method.borrow() {
+                    Value::Function { params, body, closure, is_initializer } => {
+                        let mut closure = LocalEnvironment::new(closure.clone());
+                        closure.assign(0, Some(this));
+                        Ok(Rc::new(RefCell::new(Value::Function {
+                            params: params.to_vec(),
+                            body: body.to_vec(),
+                            closure: Some(Rc::new(RefCell::new(closure))),
+                            is_initializer: *is_initializer,
+                        })))
+                    },
+                    _ => unreachable!()
+                },
+                None => match class.borrow().find_getter(method) {
+                    Some(getter) => {
+                        match &*getter.borrow() {
+                            Value::Function { params, body, closure, is_initializer } => {
+                                let mut closure = LocalEnvironment::new(closure.clone());
+                                closure.assign(0, Some(this));
+                                Value::Function {
+                                    params: params.to_vec(),
+                                    body: body.to_vec(),
+                                    closure: Some(Rc::new(RefCell::new(closure))),
+                                    is_initializer: *is_initializer,
+                                }.call(&line, self, Vec::new())
+                            },
+                            _ => unreachable!()
+                        }
+                    },
+                    None => return Err(InterpreterError {
+                        msg: method.to_owned(),
+                        line,
+                        kind: ErrorKind::UndefinedProperty,
+                    }),
+                },
+            },
+            _ => unreachable!()
+        };
+
+        method
+    }
+
+    #[inline(always)]
     fn visit_unary_expr(&mut self, operator: &UnaryOp, right: &Expr) -> InterpreterResult<Rc<RefCell<Value>>> {
         let right = self.visit_expr(right)?;
-        let right = &*right.as_ref().borrow();
+        let right = &*right.borrow();
         
         match operator.kind {
             UnaryOpKind::Neg => {
@@ -547,7 +610,7 @@ impl Interpreter {
     fn visit_binary_expr(&mut self, left: &Expr, operator: &BinaryOp, right: &Expr) -> InterpreterResult<Rc<RefCell<Value>>> {
         let left_rc = self.visit_expr(left)?;
         let right_rc = self.visit_expr(right)?;
-        let (left, right) = (&*left_rc.as_ref().borrow(), &*right_rc.as_ref().borrow());
+        let (left, right) = (&*left_rc.borrow(), &*right_rc.borrow());
 
         match operator.kind {
             BinaryOpKind::Add => match (&left, &right) {
@@ -608,7 +671,7 @@ impl Interpreter {
     #[inline(always)]
     fn visit_ternary_expr(&mut self, condition: &Expr, then_branch: &Expr, else_branch: &Expr) -> InterpreterResult<Rc<RefCell<Value>>> {
         let result = self.visit_expr(condition)?;
-        let res = self.visit_expr(match Self::is_truthy(&result.as_ref().borrow()) {
+        let res = self.visit_expr(match Self::is_truthy(&result.borrow()) {
             true => then_branch,
             false => else_branch,
         });
@@ -619,7 +682,7 @@ impl Interpreter {
     #[inline(always)]
     fn visit_var_expr(&mut self, name: &str, line: &usize, offset: &usize) -> InterpreterResult<Rc<RefCell<Value>>> {
         let value = match self.locals.get(offset) {
-            Some(binding) => self.environment.as_ref().unwrap().as_ref().borrow().get_at(binding),
+            Some(binding) => self.environment.as_ref().unwrap().borrow().get_at(binding),
             None => self.globals.get(name),
         };
 
@@ -647,7 +710,7 @@ impl Interpreter {
     #[inline(always)]
     fn visit_print_stmt(&mut self, expr: &Expr) -> InterpreterResult<()> {
         let value = self.visit_expr(expr)?;
-        println!("{}", value.as_ref().borrow());
+        println!("{}", value.borrow());
         Ok(())
     }
     
@@ -687,7 +750,7 @@ impl Interpreter {
 
     #[inline(always)]
     fn visit_if_stmt(&mut self, condition: &Expr, then_branch: &Stmt, else_branch: &Option<Box<Stmt>>) -> InterpreterResult<()> {
-        if Self::is_truthy(&self.visit_expr(condition)?.as_ref().borrow()) {
+        if Self::is_truthy(&self.visit_expr(condition)?.borrow()) {
             self.visit_stmt(then_branch)
         } else if let Some(stmt) = &else_branch {
             self.visit_stmt(stmt)
@@ -702,7 +765,7 @@ impl Interpreter {
             Stmt::Block { statements } => {
                 self.create_new_env();
 
-                while Self::is_truthy(&self.visit_expr(condition)?.as_ref().borrow()) {
+                while Self::is_truthy(&self.visit_expr(condition)?.borrow()) {
                     for stmt in statements {
                         let result = self.visit_stmt(stmt);
                         if result.is_err() {
@@ -717,7 +780,7 @@ impl Interpreter {
                 self.remove_new_env();
             },
             _ => {
-                while Self::is_truthy(&self.visit_expr(condition)?.as_ref().borrow()) {
+                while Self::is_truthy(&self.visit_expr(condition)?.borrow()) {
                     self.visit_stmt(body)?
                 }
             }
@@ -776,7 +839,7 @@ impl Interpreter {
     fn visit_class_stmt(&mut self, name: &str, superclass: &Option<Expr>, methods: &[Stmt], static_methods: &[Stmt], getters: &[Stmt], offset: &usize) -> InterpreterResult<()> {
         let superclass = if let Some(superclass) = superclass {
             let value_rc = self.visit_expr(superclass)?;
-            let value = &*value_rc.as_ref().borrow();
+            let value = &*value_rc.borrow();
             let class = match value {
                 Value::Class(class) => class,
                 _ => {
@@ -792,10 +855,14 @@ impl Interpreter {
                     })
                 }
             };
+
+            self.create_new_env();
+            self.environment.as_ref().unwrap().borrow_mut().assign(0 , Some(Rc::new(RefCell::new(Value::Class(class.clone())))));
             Some(class.clone())
         } else {
             None
         };
+
         
         let mut class = Class {
             name: name.to_owned(),
@@ -846,7 +913,11 @@ impl Interpreter {
                 );
             }
         }
-
+        
+        if class.superclass.is_some() {
+            self.remove_new_env();
+        };
+        
         let class = Some(
             Rc::new(RefCell::new(
                 Value::Class(
@@ -900,8 +971,8 @@ impl Interpreter {
             Value::Nil => String::from("nil"),
             Value::NativeFunction { .. } => "native_func".to_owned(),
             Value::Function { .. } => "func".to_owned(),
-            Value::Class(class) => format!("{}", class.as_ref().borrow()),
-            Value::Instance { class, .. } => format!("{} instance", class.as_ref().borrow()),
+            Value::Class(class) => format!("{}", class.borrow()),
+            Value::Instance { class, .. } => format!("{} instance", class.borrow()),
         };
         Err(
             InterpreterError {

@@ -58,6 +58,7 @@ impl Visitor<String> for AstPrinter {
             Expr::Get { .. } => todo!(),
             Expr::Set { .. } => todo!(),
             Expr::This { .. } => todo!(),
+            Expr::Super { .. } => todo!(),
         }
     }
 }

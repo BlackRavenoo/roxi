@@ -35,6 +35,11 @@ pub enum Expr {
         value: Box<Expr>,
         line: usize
     },
+    Super {
+        method: String,
+        offset: usize,
+        line: usize
+    },
     This {
         line: usize,
         offset: usize

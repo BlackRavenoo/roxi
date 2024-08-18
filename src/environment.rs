@@ -73,24 +73,24 @@ impl LocalEnvironment {
     }
 
     #[inline(always)]
-    pub fn assign(&mut self, binding: &Binding, value: Option<Rc<RefCell<Value>>>) {
-        if self.values.capacity() <= binding.index {
-            self.values.reserve(1 + binding.index - self.values.capacity());
+    pub fn assign(&mut self, index: usize, value: Option<Rc<RefCell<Value>>>) {
+        if self.values.capacity() <= index {
+            self.values.reserve(1 + index - self.values.capacity());
         }
 
-        while self.values.len() <= binding.index {
+        while self.values.len() <= index {
             self.values.push(None)
         }
 
-        self.values[binding.index] = value;
+        self.values[index] = value;
     }
 
     #[inline(always)]
     pub fn assign_at(&mut self, binding: &Binding, value: Option<Rc<RefCell<Value>>>) {
         if binding.scopes_up == 0 {
-            self.assign(binding, value)
+            self.assign(binding.index, value)
         } else {
-            self.ancestor(binding.index).borrow_mut().assign(binding, value)
+            self.ancestor(binding.index).borrow_mut().assign(binding.index, value)
         }
     }
 

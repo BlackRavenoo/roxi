@@ -163,6 +163,7 @@ impl ExprVisitor<ResolverResult<()>> for Resolver<'_> {
             Expr::Get { object, .. } => self.visit_expr(object),
             Expr::Set { object, value, ..} => { self.visit_expr(object)?; self.visit_expr(value) },
             Expr::This { offset, line } => self.visit_this_expr(*offset, *line),
+            Expr::Super { offset, .. } => Ok(self.resolve_local("super", *offset)),
         }
     }
 }
@@ -304,6 +305,16 @@ impl Resolver<'_> {
                 }
                 _ => unreachable!()
             }
+
+            self.begin_scope();
+            let scope = self.scopes.last_mut().unwrap();
+            scope.insert(
+                "super".to_owned(),
+                VariableData {
+                    state: VariableState::Used,
+                    index: 0,
+                }
+            );
         }
 
         self.begin_scope();
@@ -339,6 +350,10 @@ impl Resolver<'_> {
         }
         
         self.end_scope();
+
+        if superclass.is_some() {
+            self.end_scope();
+        }
         
         self.resolve_local(class_name, *offset);
 

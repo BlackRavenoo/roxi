@@ -113,25 +113,25 @@ impl<'a> Parser<'a> {
 
     #[inline(always)]
     pub fn parse(&mut self) -> ParserResult<Stmt> {
-        self.declaration()
-    }
-
-    fn declaration(&mut self) -> ParserResult<Stmt> {
-        let result = match self.token.kind {
-            TokenKind::Class => self.class_statement(),
-            TokenKind::Fun => { self.advance(); self.fun_statement() },
-            TokenKind::Var => self.var_declaration(),
-            _ => self.statement()
-        };
+        let result = self.declaration();
         if let Err(ref e) = result {
             match self.token.kind {
                 TokenKind::Error(_) => report(&self.token),
                 _ => eprintln!("{}", e),
             }
             self.synchronize()
-        }
+        };
 
         result
+    }
+
+    fn declaration(&mut self) -> ParserResult<Stmt> {
+        match self.token.kind {
+            TokenKind::Class => self.class_statement(),
+            TokenKind::Fun => { self.advance(); self.fun_statement() },
+            TokenKind::Var => self.var_declaration(),
+            _ => self.statement()
+        }
     }
 
     fn var_declaration(&mut self) -> ParserResult<Stmt> {
@@ -832,6 +832,17 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Identifier => Ok(Expr::Variable {name: self.token.get_lexeme().to_owned(), line: self.token.get_line(), offset: self.token.get_offset()}),
             TokenKind::This => Ok(Expr::This { line: self.token.get_line(), offset: self.token.get_offset() }),
+            TokenKind::Super => {
+                self.advance();
+                if self.token.kind != TokenKind::Dot {
+                    return Err(self.unexpected_token(format!("'{}'. Expected '.'.", self.token.get_lexeme())))
+                }
+                self.advance();
+                if self.token.kind != TokenKind::Identifier {
+                    return Err(self.unexpected_token(format!("'{}'. Expected identifier.", self.token.get_lexeme())))
+                }
+                Ok(Expr::Super { method: self.token.get_lexeme().to_owned(), offset: self.token.get_offset(), line: self.token.get_line() })
+            },
             _ => return Err(self.unexpected_token(format!("'{}'", self.token.get_lexeme())))
         };
         self.advance();
