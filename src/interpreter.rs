@@ -200,7 +200,7 @@ impl Value {
                         )
                 }
 
-                let res = match interpreter.execute_block(&body) {
+                let res = match interpreter.execute_block(body) {
                     Ok(_) => Ok(Rc::new(RefCell::new(Value::Nil))),
                     Err(e) => match e.kind {
                         ErrorKind::Return(value) => Ok(value),
@@ -356,7 +356,7 @@ impl Interpreter {
 
         let status = match self.locals.get(offset) {
             Some(binding) => {
-                self.environment.as_mut().unwrap().borrow_mut().assign_at(&binding, Some(value.clone()));
+                self.environment.as_mut().unwrap().borrow_mut().assign_at(binding, Some(value.clone()));
                 true
             },
             None => {
@@ -393,7 +393,7 @@ impl Interpreter {
     fn visit_call_expr(&mut self, line: &usize, callee: &Expr, arguments: &[Expr]) -> InterpreterResult<Rc<RefCell<Value>>> {
         let callee = self.visit_expr(callee)?;
 
-        let arguments = arguments.into_iter()
+        let arguments = arguments.iter()
             .map(|arg| self.visit_expr(arg))
             .collect::<InterpreterResult<Vec<_>>>()?;
 
@@ -413,7 +413,7 @@ impl Interpreter {
     #[inline(always)]
     fn visit_lambda_expr(&mut self, params: &[(String, usize)], body: &[Stmt]) -> InterpreterResult<Rc<RefCell<Value>>> {
         Ok(Rc::new(RefCell::new(Value::Function {
-            params: params.into_iter().map(|x| x.1).collect(),
+            params: params.iter().map(|x| x.1).collect(),
             body: body.to_vec(),
             closure: self.environment.clone(),
             is_initializer: false
@@ -427,47 +427,45 @@ impl Interpreter {
             Value::Instance { fields, class } => {
                 if let Some(val) = fields.get(name) {
                     Ok(val.clone())
-                } else {
-                    if let Some(method) = class.borrow().find_method(name) {
-                        match &*method.borrow() {
-                            Value::Function { params, body, closure, is_initializer } => {
-                                let mut closure = LocalEnvironment::new(closure.clone());
-                                closure.assign(0, Some(object));
-                                Ok(Rc::new(RefCell::new(Value::Function {
-                                    params: params.to_vec(),
-                                    body: body.to_vec(),
-                                    closure: Some(Rc::new(RefCell::new(closure))),
-                                    is_initializer: *is_initializer
-                                })))
-                            },
-                            _ => unreachable!(),
-                        }
-                    } else if let Some(getter) = class.borrow().find_getter(name) {
-                        match &*getter.borrow() {
-                            Value::Function {
-                                params,
-                                body,
-                                closure,
-                                is_initializer
-                            } => {
-                                let mut closure = LocalEnvironment::new(closure.clone());
-                                closure.assign(0, Some(object));
-                                Value::Function {
-                                    params: params.to_vec(),
-                                    body: body.to_vec(),
-                                    closure: Some(Rc::new(RefCell::new(closure))),
-                                    is_initializer: *is_initializer
-                                }.call(&line, self, Vec::new())
-                            },
-                            _ => unreachable!()
-                        } 
-                    } else {
-                        Err(InterpreterError {
-                            msg: name.to_owned(),
-                            line,
-                            kind: ErrorKind::UndefinedProperty,
-                        })
+                } else if let Some(method) = class.borrow().find_method(name) {
+                    match &*method.borrow() {
+                        Value::Function { params, body, closure, is_initializer } => {
+                            let mut closure = LocalEnvironment::new(closure.clone());
+                            closure.assign(0, Some(object));
+                            Ok(Rc::new(RefCell::new(Value::Function {
+                                params: params.to_vec(),
+                                body: body.to_vec(),
+                                closure: Some(Rc::new(RefCell::new(closure))),
+                                is_initializer: *is_initializer
+                            })))
+                        },
+                        _ => unreachable!(),
                     }
+                } else if let Some(getter) = class.borrow().find_getter(name) {
+                    match &*getter.borrow() {
+                        Value::Function {
+                            params,
+                            body,
+                            closure,
+                            is_initializer
+                        } => {
+                            let mut closure = LocalEnvironment::new(closure.clone());
+                            closure.assign(0, Some(object));
+                            Value::Function {
+                                params: params.to_vec(),
+                                body: body.to_vec(),
+                                closure: Some(Rc::new(RefCell::new(closure))),
+                                is_initializer: *is_initializer
+                            }.call(&line, self, Vec::new())
+                        },
+                        _ => unreachable!()
+                    } 
+                } else {
+                    Err(InterpreterError {
+                        msg: name.to_owned(),
+                        line,
+                        kind: ErrorKind::UndefinedProperty,
+                    })
                 }
             }
             Value::Class(class) => {
@@ -599,10 +597,10 @@ impl Interpreter {
             UnaryOpKind::Neg => {
                 match right {
                     Value::Number(num) => Ok(Rc::new(RefCell::new(Value::Number(-num)))),
-                    v => Self::invalid_operand(&v, "number", operator.line)
+                    v => Self::invalid_operand(v, "number", operator.line)
                 }
             },
-            UnaryOpKind::Not => Ok(Rc::new(RefCell::new(Value::Bool(!Self::is_truthy(&right))))),
+            UnaryOpKind::Not => Ok(Rc::new(RefCell::new(Value::Bool(!Self::is_truthy(right))))),
         }
     }
 
@@ -616,19 +614,19 @@ impl Interpreter {
             BinaryOpKind::Add => match (&left, &right) {
                 (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Number(left + right)))),
                 (Value::String(_), _) | (_, Value::String(_)) => Ok(Rc::new(RefCell::new(Value::String(format!("{}{}", left, right))))),
-                (Value::Number(_), v) => Self::invalid_operand(&v, "number or string", operator.line),
-                (Value::Bool(_), v) | (Value::Nil, v) => Self::invalid_operand(&v, "string", operator.line),
-                (v, _) => Self::invalid_operand(&v, "number or string", operator.line)
+                (Value::Number(_), v) => Self::invalid_operand(v, "number or string", operator.line),
+                (Value::Bool(_), v) | (Value::Nil, v) => Self::invalid_operand(v, "string", operator.line),
+                (v, _) => Self::invalid_operand(v, "number or string", operator.line)
             },
             BinaryOpKind::Sub => match (left, right) {
                 (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Number(left - right)))),
-                (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
-                (v, _) => Self::invalid_operand(&v, "number", operator.line)
+                (Value::Number(_), v) => Self::invalid_operand(v, "number", operator.line),
+                (v, _) => Self::invalid_operand(v, "number", operator.line)
             },
             BinaryOpKind::Mul => match (left, right) {
                 (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Number(left * right)))),
-                (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
-                (v, _) => Self::invalid_operand(&v, "number", operator.line)
+                (Value::Number(_), v) => Self::invalid_operand(v, "number", operator.line),
+                (v, _) => Self::invalid_operand(v, "number", operator.line)
             },
             BinaryOpKind::Div => match (left, right) {
                 (Value::Number(_), Value::Number(right)) if *right == 0.0 => Err(
@@ -639,30 +637,30 @@ impl Interpreter {
                     }
                 ),
                 (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Number(left / right)))),
-                (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
-                (v, _) => Self::invalid_operand(&v, "number", operator.line)
+                (Value::Number(_), v) => Self::invalid_operand(v, "number", operator.line),
+                (v, _) => Self::invalid_operand(v, "number", operator.line)
             },
-            BinaryOpKind::Eq => Ok(Rc::new(RefCell::new(Value::Bool(Self::is_equal(&left, &right))))),
-            BinaryOpKind::Ne => Ok(Rc::new(RefCell::new(Value::Bool(!Self::is_equal(&left, &right))))),
+            BinaryOpKind::Eq => Ok(Rc::new(RefCell::new(Value::Bool(Self::is_equal(left, right))))),
+            BinaryOpKind::Ne => Ok(Rc::new(RefCell::new(Value::Bool(!Self::is_equal(left, right))))),
             BinaryOpKind::Lt => match (left, right) {
                 (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Bool(left < right)))),
-                (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
-                (v, _) => Self::invalid_operand(&v, "number", operator.line)
+                (Value::Number(_), v) => Self::invalid_operand(v, "number", operator.line),
+                (v, _) => Self::invalid_operand(v, "number", operator.line)
             },
             BinaryOpKind::Le => match (left, right) {
                 (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Bool(left <= right)))),
-                (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
-                (v, _) => Self::invalid_operand(&v, "number", operator.line)
+                (Value::Number(_), v) => Self::invalid_operand(v, "number", operator.line),
+                (v, _) => Self::invalid_operand(v, "number", operator.line)
             },
             BinaryOpKind::Gt => match (left, right) {
                 (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Bool(left > right)))),
-                (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
-                (v, _) => Self::invalid_operand(&v, "number", operator.line)
+                (Value::Number(_), v) => Self::invalid_operand(v, "number", operator.line),
+                (v, _) => Self::invalid_operand(v, "number", operator.line)
             },
             BinaryOpKind::Ge => match (left, right) {
                 (Value::Number(left), Value::Number(right)) => Ok(Rc::new(RefCell::new(Value::Bool(left >= right)))),
-                (Value::Number(_), v) => Self::invalid_operand(&v, "number", operator.line),
-                (v, _) => Self::invalid_operand(&v, "number", operator.line)
+                (Value::Number(_), v) => Self::invalid_operand(v, "number", operator.line),
+                (v, _) => Self::invalid_operand(v, "number", operator.line)
             },
             _ => unreachable!()
         }
@@ -800,7 +798,7 @@ impl Interpreter {
 
     fn visit_function_stmt(&mut self, name: &str, params: &[(String, usize)], body: &[Stmt], offset: usize) -> InterpreterResult<()> {
         let func = Some(Rc::new(RefCell::new(Value::Function {
-            params: params.into_iter().map(|x| x.1).collect(),
+            params: params.iter().map(|x| x.1).collect(),
             body: body.to_vec(),
             closure: self.environment.clone(),
             is_initializer: false
@@ -872,7 +870,7 @@ impl Interpreter {
             getters: HashMap::with_capacity(getters.len())
         };
 
-        for method in methods.into_iter() {
+        for method in methods.iter() {
             if let Stmt::Function { name, params, body, .. } = method {
                 class.methods.insert(
                     name.to_owned(),
@@ -944,7 +942,7 @@ impl Interpreter {
     #[inline(always)]
     fn is_truthy(value: &Value) -> bool {
         match value {
-            Value::String(string) => string.len() > 0,
+            Value::String(string) => !string.is_empty(),
             Value::Bool(bool) => *bool,
             Value::Number(num) => *num != 0.0,
             Value::Nil => false,

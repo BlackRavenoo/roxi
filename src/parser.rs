@@ -549,7 +549,7 @@ impl<'a> Parser<'a> {
 
     fn assignment(&mut self) -> ParserResult<Expr> {
         if self.token.kind == TokenKind::Fun {
-            return Ok(self.lambda()?)
+            return self.lambda()
         }
         let mut expr = self.ternary()?;
 

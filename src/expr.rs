@@ -1,9 +1,5 @@
 use crate::stmt::Stmt;
 
-pub trait Visitor<T> {
-    fn visit(expr: &Expr) -> T;
-}
-
 pub trait ExprVisitor<T> {
     fn visit_expr(&mut self, expr: &Expr) -> T;
 }
@@ -95,38 +91,10 @@ pub enum BinaryOpKind {
     Or
 }
 
-impl BinaryOpKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            BinaryOpKind::Add => "+",
-            BinaryOpKind::Sub => "-",
-            BinaryOpKind::Mul => "*",
-            BinaryOpKind::Div => "/",
-            BinaryOpKind::Eq => "==",
-            BinaryOpKind::Ne => "!=",
-            BinaryOpKind::Lt => "<",
-            BinaryOpKind::Le => "<=",
-            BinaryOpKind::Gt => ">",
-            BinaryOpKind::Ge => ">=",
-            BinaryOpKind::And => "and",
-            BinaryOpKind::Or => "or",
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum UnaryOpKind {
     Neg,
     Not
-}
-
-impl UnaryOpKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            UnaryOpKind::Neg => "-",
-            UnaryOpKind::Not => "!",
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
