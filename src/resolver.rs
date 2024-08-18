@@ -25,6 +25,12 @@ pub enum ResolverError {
     },
     SelfInheritance {
         line: usize
+    },
+    SuperOutsideClass {
+        line: usize
+    },
+    SuperOutsideSubclass {
+        line: usize
     }
 }
 
@@ -63,6 +69,16 @@ impl Display for ResolverError {
                 "[line {}] Error: Class inherits from itself.",
                 line
             ),
+            ResolverError::SuperOutsideClass { line } => write!(
+                f,
+                "[line {}] Error: `super` outside of a class.",
+                line
+            ),
+            ResolverError::SuperOutsideSubclass { line } => write!(
+                f,
+                "[line {}] Error: `super` in a class with no superclass.",
+                line
+            ),
         }
     }
 }
@@ -80,7 +96,8 @@ enum FunctionKind {
 #[derive(PartialEq)]
 enum ClassKind {
     None,
-    Class
+    Class,
+    Subclass
 }
 
 #[derive(Debug)]
@@ -163,7 +180,7 @@ impl ExprVisitor<ResolverResult<()>> for Resolver<'_> {
             Expr::Get { object, .. } => self.visit_expr(object),
             Expr::Set { object, value, ..} => { self.visit_expr(object)?; self.visit_expr(value) },
             Expr::This { offset, line } => self.visit_this_expr(*offset, *line),
-            Expr::Super { offset, .. } => Ok(self.resolve_local("super", *offset)),
+            Expr::Super { offset, line, .. } => self.visit_super_expr(offset, *line),
         }
     }
 }
@@ -301,7 +318,8 @@ impl Resolver<'_> {
                 Expr::Variable { name, line, .. } => if name == class_name {
                     return Err(ResolverError::SelfInheritance { line: *line })
                 } else {
-                    self.visit_expr(superclass)?
+                    self.visit_expr(superclass)?;
+                    self.current_class = ClassKind::Subclass;
                 }
                 _ => unreachable!()
             }
@@ -420,6 +438,20 @@ impl Resolver<'_> {
             })
         }
         self.resolve_local("this", offset);
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn visit_super_expr(&mut self, offset: &usize, line: usize) -> ResolverResult<()> {
+        if self.current_class == ClassKind::None {
+            return Err(ResolverError::SuperOutsideClass { line })
+        } else if self.current_class == ClassKind::Class {
+            return Err(ResolverError::SuperOutsideSubclass { line })
+        } else {
+            self.resolve_local("super", *offset);
+        }
+
+
         Ok(())
     }
 
