@@ -302,8 +302,19 @@ impl Resolver<'_> {
 
     #[inline(always)]
     fn visit_while_stmt(&mut self, condition: &Expr, body: &Stmt) -> ResolverResult<()> {
-        self.visit_expr(condition)?;
-        self.visit_stmt(body)
+        match body {
+            Stmt::Block { statements } =>  {
+                self.begin_scope();
+                self.visit_expr(condition)?;
+                let res = self.resolve_stmts(statements);
+                self.end_scope();
+                res
+            },
+            _ => {
+                self.visit_expr(condition)?;
+                self.visit_stmt(body)
+            }
+        }
     }
 
     #[inline(always)]
@@ -432,7 +443,7 @@ impl Resolver<'_> {
 
     #[inline(always)]
     fn visit_this_expr(&mut self, offset: usize, line: usize) -> ResolverResult<()> {
-        if self.current_class != ClassKind::Class {
+        if self.current_class == ClassKind::None {
             return Err(ResolverError::ThisOutsideClass {
                 line
             })

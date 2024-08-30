@@ -489,19 +489,25 @@ impl Interpreter {
     #[inline(always)]
     fn visit_set_expr(&mut self, name: &str, object: &Expr, value: &Expr, line: usize) -> InterpreterResult<Rc<RefCell<Value>>> {
         let object_rc = self.visit_expr(object)?;
-        let mut object = object_rc.borrow_mut();
 
-        match &mut *object {
-            Value::Instance { fields, .. } => {
-                let value = self.visit_expr(value)?;
-                fields.insert(name.to_owned(), value);
-                Ok(object_rc.clone())
-            },
-            _ => Err(InterpreterError{
+        match &*(object_rc.borrow()) {
+            Value::Instance { .. } => (),
+            _ => return Err(InterpreterError{
                 msg: name.to_owned(),
                 line,
                 kind: ErrorKind::PropertyOnNonInstance(object_rc.clone()),
             })
+        }
+        
+        let value = self.visit_expr(value)?;
+        let mut object = object_rc.borrow_mut();
+        
+        match &mut *object {
+            Value::Instance { fields, .. } => {
+                fields.insert(name.to_owned(), value);
+                Ok(object_rc.clone())
+            }
+            _ => unreachable!()
         }
     }
     #[inline(always)]
